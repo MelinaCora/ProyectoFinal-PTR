@@ -57,7 +57,8 @@ Cada LED: Arduino pin → resistor 220 Ω → ánodo del LED. Cátodo → GND de
 ## Wave Generator (sirena)
 
 El archivo es `sirena.wav`, en la raíz del repo, al lado de `Citcuito1.sim1`.
-PCM 16 bit, mono, 8000 Hz, barrido entre 650 y 1300 Hz. Para regenerarlo:
+PCM 16 bit, mono, 8000 Hz, 20 s. El tono barre entre 650 y 1300 Hz. La amplitud
+simula la distancia: lejos, pico y otra vez lejos. Para regenerarlo:
 
 ```powershell
 powershell -NoProfile -File simulide\generar_sirena.ps1
@@ -82,9 +83,10 @@ Salida del WaveGen al pin **A0**. Masa del circuito = GND del Uno.
 Para probar: con la simulación corriendo, el botón de la izquierda del WaveGen
 enciende/apaga el WAV.
 
-- **On** → LCD "AMBULANCIA DETECTADA!", carril 1 verde, carril 2 rojo.
-- **Off** → a las 25 ventanas sin señal vuelve el ciclo normal.
-- En el osciloscopio de A0: onda centrada en ~2,5 V, barriendo alrededor de 1 kHz.
+- **On, lejos:** el ciclo sigue normal. La energía todavía no alcanza el umbral.
+- **On, en el pico:** LCD "AMBULANCIA DETECTADA!", carril 1 verde, carril 2 rojo.
+- **On, al alejarse:** a las 25 ventanas sin detección vuelve el ciclo normal.
+- En el osciloscopio de A0: onda centrada en ~2,5 V, barriendo alrededor de 1 kHz, con amplitud que sube y baja.
 
 ## LCD I2C (dirección 0x27)
 

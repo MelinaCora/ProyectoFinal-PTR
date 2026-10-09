@@ -59,9 +59,11 @@ en [`simulide/ARMADO.md`](simulide/ARMADO.md).
 ## Sirena
 
 `AMBULANCIA` / `DETECTADA!` lo dispara [`sirena.wav`](sirena.wav), en la raíz
-del proyecto, junto a `Citcuito1.sim1`. Es PCM de 16 bit, mono, a 8000 Hz: un
-barrido continuo entre 650 y 1300 Hz, así cruza las bandas 750, 1000 y 1250 Hz
-que mira el firmware.
+del proyecto, junto a `Citcuito1.sim1`. Es PCM de 16 bit, mono, a 8000 Hz, de
+20 segundos. El tono sigue barriendo entre 650 y 1300 Hz. Lo que cambia es la
+energía: 4 s muy baja (lejos), 4 s de acercamiento, 4 s en el pico, 4 s
+alejándose y 4 s otra vez lejos. El sketch no cambia; entra en modo ambulancia
+solo cuando esa energía supera el umbral.
 
 En el Wave Generator de SimulIDE:
 
@@ -126,12 +128,13 @@ Start** para que se cargue el firmware al iniciar la simulación.
 
 Iniciá la simulación con **Power** y usá el botón izquierdo del Wave Generator:
 
-- Encendido: `sirena.wav` entra por `A0` y debe activarse el modo ambulancia.
-- Apagado: después de 25 ventanas sin señal vuelve el ciclo normal.
+- Al encenderlo, los primeros segundos la sirena está lejos: el ciclo sigue normal.
+- En el pico de volumen entra el modo ambulancia.
+- Cuando se aleja y la energía baja, vuelven las 25 ventanas sin detección y el ciclo normal.
+- Apagado: también corta la detección y, tras esas ventanas, vuelve el ciclo normal.
 
-En el osciloscopio de `A0` la onda tiene que verse centrada en unos 2,5 V y
-barriendo alrededor de 1 kHz. Si el tono queda fuera de 750–1250 Hz, ajustá el
-WAV con `simulide\generar_sirena.ps1`; el sketch no hace falta tocarlo.
+En el osciloscopio de `A0` la onda tiene que verse centrada en unos 2,5 V,
+barriendo alrededor de 1 kHz, con amplitud que crece y después decrece.
 
 ## Prueba opcional del detector
 
@@ -142,7 +145,7 @@ powershell -NoProfile -File test\test_goertzel.ps1
 ```
 
 Comprueba la detección de 1000 Hz, que 200 Hz y el silencio no se detecten, y
-que `sirena.wav` dispare al menos dos ventanas seguidas.
+que `sirena.wav` no dispare de lejos, sí en el pico y no otra vez al alejarse.
 
 ## Problemas comunes
 

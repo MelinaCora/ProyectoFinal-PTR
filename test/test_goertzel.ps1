@@ -92,25 +92,38 @@ Expect-True "siren wav is PCM 16-bit mono at 8000 Hz" (
 
 # WaveGen: mid 2.5 V, semi amplitude 2 V. ADC span is 0-5 V = 0-1023.
 $adcScale = (2.0 / 5.0) * 1023.0 / 32767.0
-$consecutive = 0
-$maxConsecutive = 0
-for ($start = 0; ($start + $n) -le $wav.Samples.Length; $start += $n) {
-  $window = New-Object double[] $n
-  $mean = 0.0
-  for ($j = 0; $j -lt $n; $j++) {
-    $window[$j] = $wav.Samples[$start + $j] * $adcScale
-    $mean += $window[$j]
+
+function Get-MaxConsecutive([int]$fromSample, [int]$toSample) {
+  $consecutive = 0
+  $maxConsecutive = 0
+  $start = $fromSample
+  while (($start + $script:n) -le $toSample) {
+    $window = New-Object double[] $script:n
+    $mean = 0.0
+    for ($j = 0; $j -lt $script:n; $j++) {
+      $window[$j] = $wav.Samples[$start + $j] * $adcScale
+      $mean += $window[$j]
+    }
+    $mean /= $script:n
+    for ($j = 0; $j -lt $script:n; $j++) { $window[$j] -= $mean }
+    if (Test-SirenDetected $window) {
+      $consecutive++
+      if ($consecutive -gt $maxConsecutive) { $maxConsecutive = $consecutive }
+    } else {
+      $consecutive = 0
+    }
+    $start += $script:n
   }
-  $mean /= $n
-  for ($j = 0; $j -lt $n; $j++) { $window[$j] -= $mean }
-  if (Test-SirenDetected $window) {
-    $consecutive++
-    if ($consecutive -gt $maxConsecutive) { $maxConsecutive = $consecutive }
-  } else {
-    $consecutive = 0
-  }
+  return $maxConsecutive
 }
-Expect-True "siren wav is detected for 2 consecutive windows" ($maxConsecutive -ge 2)
+
+$farSamples = 4 * 8000
+$peakStart = 8 * 8000
+$peakEnd = 12 * 8000
+$leaveStart = 16 * 8000
+Expect-True "distant siren is not detected" ((Get-MaxConsecutive 0 $farSamples) -eq 0)
+Expect-True "siren at peak is detected for 2 consecutive windows" ((Get-MaxConsecutive $peakStart $peakEnd) -ge 2)
+Expect-True "departing siren is not detected" ((Get-MaxConsecutive $leaveStart $wav.Samples.Length) -eq 0)
 
 if ($failed -gt 0) {
   Write-Host "$failed test(s) failed"
