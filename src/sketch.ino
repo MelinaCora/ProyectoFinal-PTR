@@ -9,15 +9,52 @@ const int LED_ROJO_1 = 8;
 const int LED_AMARILLO_1 = 9;
 const int LED_VERDE_1 = 10;
 
-// Semáforo 2 (Carril B - Cruzado)
-const int LED_VERDE_2 = 5;
+// Semáforo 2 (Carril B - Cruzado): mismo orden que el 1 (rojo, amarillo, verde)
+const int LED_ROJO_2 = 5;
 const int LED_AMARILLO_2 = 6;
-const int LED_ROJO_2 = 7;
+const int LED_VERDE_2 = 7;
 
 const int PIN_MIC = A0;
-const unsigned int PERIODO_MUESTRA_US = 125;  // 8 kHz
 const int HITS_PARA_ENTRAR = 2;
-const int MISS_PARA_SALIR = 3;
+const int MISS_PARA_SALIR = 25;
+
+// Si el I2C del LCD está mal, lcd.init() se cuelga y no enciende ningún LED.
+// Dejá true cuando el display esté cableado; false para probar solo semáforos.
+const bool USAR_LCD = true;
+
+void apagarSemaforos() {
+  digitalWrite(LED_ROJO_1, LOW);
+  digitalWrite(LED_AMARILLO_1, LOW);
+  digitalWrite(LED_VERDE_1, LOW);
+  digitalWrite(LED_ROJO_2, LOW);
+  digitalWrite(LED_AMARILLO_2, LOW);
+  digitalWrite(LED_VERDE_2, LOW);
+}
+
+void encenderTodos() {
+  digitalWrite(LED_ROJO_1, HIGH);
+  digitalWrite(LED_AMARILLO_1, HIGH);
+  digitalWrite(LED_VERDE_1, HIGH);
+  digitalWrite(LED_ROJO_2, HIGH);
+  digitalWrite(LED_AMARILLO_2, HIGH);
+  digitalWrite(LED_VERDE_2, HIGH);
+}
+
+void lcdTexto(int col, int fil, const char* texto) {
+  if (!USAR_LCD) return;
+  lcd.setCursor(col, fil);
+  lcd.print(texto);
+}
+
+void mostrarNormal() {
+  lcdTexto(0, 0, "FUNCIONAMIENTO  ");
+  lcdTexto(0, 1, "NORMAL          ");
+}
+
+void mostrarAmbulancia() {
+  lcdTexto(0, 0, "AMBULANCIA      ");
+  lcdTexto(0, 1, "DETECTADA!      ");
+}
 
 void setup() {
   pinMode(LED_ROJO_1, OUTPUT);
@@ -28,27 +65,39 @@ void setup() {
   pinMode(LED_AMARILLO_2, OUTPUT);
   pinMode(LED_VERDE_2, OUTPUT);
 
-  lcd.init();
-  lcd.backlight();
-  lcd.clear();
-  lcd.setCursor(0, 0);
-  lcd.print("CRUCE 2 SEMAFOROS");
-  lcd.setCursor(0, 1);
-  lcd.print("SIRENA GOERTZEL");
-  delay(2000);
-  lcd.clear();
+  // Prueba: si esto no parpadea, el MCU no corre o los LEDs están mal.
+  for (int i = 0; i < 3; i++) {
+    encenderTodos();
+    delay(300);
+    apagarSemaforos();
+    delay(300);
+  }
+
+  if (USAR_LCD) {
+    lcd.init();
+    lcd.backlight();
+    lcd.clear();
+    mostrarNormal();
+  }
 }
 
 bool haySirena() {
   int16_t samples[GOERTZEL_N];
-  unsigned long next = micros();
+  unsigned long t0 = micros();
+  long suma = 0;
   for (int i = 0; i < GOERTZEL_N; i++) {
-    samples[i] = (int16_t)analogRead(PIN_MIC) - 512;
-    next += PERIODO_MUESTRA_US;
-    while ((long)(micros() - next) < 0) {
-    }
+    samples[i] = (int16_t)analogRead(PIN_MIC);
+    suma += samples[i];
   }
-  return siren_detected(samples, GOERTZEL_N, GOERTZEL_FS);
+  unsigned long elapsed = micros() - t0;
+  int16_t media = (int16_t)(suma / GOERTZEL_N);
+  for (int i = 0; i < GOERTZEL_N; i++) {
+    samples[i] = (int16_t)(samples[i] - media);
+  }
+  float fs = (elapsed > 0)
+      ? (1000000.0f * (float)(GOERTZEL_N - 1) / (float)elapsed)
+      : GOERTZEL_FS;
+  return siren_detected(samples, GOERTZEL_N, fs);
 }
 
 void semaforoAmbulancia() {
@@ -61,11 +110,7 @@ void semaforoAmbulancia() {
 }
 
 void modoAmbulancia() {
-  lcd.clear();
-  lcd.setCursor(0, 0);
-  lcd.print("  AMBULANCIA  ");
-  lcd.setCursor(0, 1);
-  lcd.print("  DETECTADA!  ");
+  mostrarAmbulancia();
 
   int misses = 0;
   while (misses < MISS_PARA_SALIR) {
@@ -77,11 +122,7 @@ void modoAmbulancia() {
     }
   }
 
-  lcd.clear();
-  lcd.setCursor(0, 0);
-  lcd.print("TRAFICO NORMAL");
-  delay(1000);
-  lcd.clear();
+  mostrarNormal();
 }
 
 bool comprobarAmbulancia(int tiempoMs) {
@@ -102,33 +143,23 @@ bool comprobarAmbulancia(int tiempoMs) {
 }
 
 void loop() {
+  mostrarNormal();
+
   // FASE 1: Semáforo 1 VERDE | Semáforo 2 ROJO
-  lcd.setCursor(0, 0);
-  lcd.print("C1: VERDE       ");
-  lcd.setCursor(0, 1);
-  lcd.print("C2: ROJO        ");
   digitalWrite(LED_VERDE_1, HIGH);   digitalWrite(LED_AMARILLO_1, LOW);  digitalWrite(LED_ROJO_1, LOW);
   digitalWrite(LED_VERDE_2, LOW);    digitalWrite(LED_AMARILLO_2, LOW);  digitalWrite(LED_ROJO_2, HIGH);
   if (comprobarAmbulancia(5000)) return;
 
   // FASE 2: Semáforo 1 AMARILLO | Semáforo 2 ROJO
-  lcd.setCursor(0, 0);
-  lcd.print("C1: AMARILLO    ");
   digitalWrite(LED_VERDE_1, LOW);    digitalWrite(LED_AMARILLO_1, HIGH);
   if (comprobarAmbulancia(2000)) return;
 
   // FASE 3: Semáforo 1 ROJO | Semáforo 2 VERDE
-  lcd.setCursor(0, 0);
-  lcd.print("C1: ROJO        ");
-  lcd.setCursor(0, 1);
-  lcd.print("C2: VERDE       ");
   digitalWrite(LED_AMARILLO_1, LOW); digitalWrite(LED_ROJO_1, HIGH);
   digitalWrite(LED_ROJO_2, LOW);     digitalWrite(LED_VERDE_2, HIGH);
   if (comprobarAmbulancia(5000)) return;
 
   // FASE 4: Semáforo 1 ROJO | Semáforo 2 AMARILLO
-  lcd.setCursor(0, 1);
-  lcd.print("C2: AMARILLO    ");
   digitalWrite(LED_VERDE_2, LOW);    digitalWrite(LED_AMARILLO_2, HIGH);
   if (comprobarAmbulancia(2000)) return;
 }

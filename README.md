@@ -16,11 +16,14 @@ El ciclo normal consta de cuatro fases:
 | 3    | Rojo                  | Verde                 | 5 s      |
 | 4    | Rojo                  | Amarillo              | 2 s      |
 
-El firmware toma ventanas de 64 muestras a 8 kHz y analiza las frecuencias
-750, 1000 y 1250 Hz. Dos ventanas consecutivas con señal en esas bandas
-interrumpen el ciclo: el carril A queda en verde y el carril B en rojo. Al
-dejar de detectar la señal durante tres ventanas, se reanuda el ciclo normal.
-El LCD indica el estado del cruce.
+El firmware toma ventanas de 64 muestras y mide la frecuencia de muestreo real
+de esa ventana. Analiza las bandas 750, 1000 y 1250 Hz. Dos ventanas
+consecutivas con señal en esas bandas interrumpen el ciclo: el carril A queda
+en verde y el carril B en rojo. Al dejar de detectar la señal durante 25
+ventanas, se reanuda el ciclo normal.
+
+Con el Wave Generator apagado el LCD muestra `FUNCIONAMIENTO` / `NORMAL`.
+Con la sirena detectada muestra `AMBULANCIA` / `DETECTADA!`.
 
 ## Componentes del circuito
 
@@ -37,12 +40,15 @@ El LCD indica el estado del cruce.
 | Semáforo 1 - rojo | D8 |
 | Semáforo 1 - amarillo | D9 |
 | Semáforo 1 - verde | D10 |
-| Semáforo 2 - verde | D5 |
+| Semáforo 2 - rojo | D5 |
 | Semáforo 2 - amarillo | D6 |
-| Semáforo 2 - rojo | D7 |
+| Semáforo 2 - verde | D7 |
 | Wave Generator - salida | A0 |
 | LCD - SDA | A4 |
 | LCD - SCL | A5 |
+
+Ambos semáforos van en orden rojo–amarillo–verde. El sketch (`src/sketch.ino`)
+es la referencia.
 
 Cada LED se conecta desde su pin del Arduino, a través de una resistencia de
 220 Ω, hasta el ánodo. Conectá el cátodo a GND.
@@ -58,26 +64,29 @@ Instalá **SimulIDE 1.1.0 SR2** desde
 [la página de descargas de SimulIDE](https://simulide.com/p/download110/).
 
 Para compilar el firmware, instalá la extensión **PlatformIO IDE** en VS Code.
+En Cursor a veces no aparece en el marketplace: instalá el `.vsix` de
+[v3.3.4](https://github.com/platformio/platformio-vscode-ide/releases/tag/v3.3.4)
+y recargá la ventana (`Ctrl+Shift+P` → **Developer: Reload Window**).
 También podés usar PlatformIO Core si el comando `pio` está disponible en la
 terminal.
 
 ### 2. Generar el firmware `.hex`
 
-Abrí una terminal en la carpeta raíz del proyecto y ejecutá:
+La forma fiable en Cursor y VS Code es el ícono de PlatformIO (la hormiga):
+**Project Tasks > uno > General > Build**.
+
+Si `pio` está en el PATH, desde la carpeta raíz del proyecto:
 
 ```powershell
 pio run
 ```
 
-PlatformIO compila el proyecto para Arduino Uno. Si la compilación termina
-correctamente, el archivo que se carga en SimulIDE queda en:
+Si la compilación termina correctamente, el archivo que se carga en SimulIDE
+queda en:
 
 ```text
 .pio/build/uno/firmware.hex
 ```
-
-También podés compilar desde VS Code: **PlatformIO > Project Tasks > uno >
-General > Build**.
 
 ### 3. Armar el circuito en SimulIDE y cargar el firmware
 
@@ -113,16 +122,17 @@ Comprueba la detección de 1000 Hz y que 200 Hz y el silencio no se detecten.
 
 ## Problemas comunes
 
-- **`pio` no se reconoce:** instalá PlatformIO IDE/Core y abrí una terminal
-  donde el comando `pio` esté disponible, o compilá con **PlatformIO > Project
-  Tasks > uno > General > Build**.
-- **SimulIDE no encuentra el firmware:** ejecutá `pio run` y seleccioná
+- **`pio` no se reconoce:** compilá con **PlatformIO > Project Tasks > uno >
+  General > Build**. En Windows el ejecutable `pio` a veces está bloqueado por
+  Control de aplicaciones.
+- **SimulIDE no encuentra el firmware:** compilá y seleccioná
   `.pio/build/uno/firmware.hex`.
 - **El microcontrolador no arranca:** verificá que `RESET` esté conectado a
   5 V.
-- **El LCD queda en blanco:** revisá la dirección `0x27`, `Control Code = 32`,
-  las conexiones de A0/A1/A2 a 5 V y que RW del HD44780 esté conectado a P1 o
-  GND. Consultá [`simulide/ARMADO.md`](simulide/ARMADO.md).
+- **El LCD queda en blanco:** en el I2C to Parallel poné **I2C Address = 39**
+  (`0x27`). Conectá A0, A1 y A2 del adaptador a 5 V, SDA a A4 y SCL a A5.
+  RW del HD44780 va a P1 o a GND. Consultá
+  [`simulide/ARMADO.md`](simulide/ARMADO.md).
 - **No se detecta la sirena:** verificá que el Wave Generator sea senoidal,
   esté conectado a A0 y use una frecuencia de 1000 Hz, tensión central de
   2.5 V y amplitud de 2 V.

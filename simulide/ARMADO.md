@@ -44,9 +44,9 @@ Colores de LED: 2 rojos, 2 amarillos, 2 verdes. En propiedades de cada Led,
 | Semáforo 1 rojo | D8 |
 | Semáforo 1 amarillo | D9 |
 | Semáforo 1 verde | D10 |
-| Semáforo 2 verde | D5 |
+| Semáforo 2 rojo | D5 |
 | Semáforo 2 amarillo | D6 |
-| Semáforo 2 rojo | D7 |
+| Semáforo 2 verde | D7 |
 | Sirena (WaveGen OUT) | A0 |
 | LCD SDA | A4 |
 | LCD SCL | A5 |
