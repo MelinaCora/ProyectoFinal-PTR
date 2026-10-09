@@ -9,13 +9,13 @@ https://simulide.com/p/download110/
 
 ## Mejoras respecto al circuito Wokwi
 
-- El potenciómetro (tensión continua) se reemplaza por un **Wave Generator** senoidal.
-  Así el ADC ve una onda de ~1 kHz, no un umbral estático.
+- El potenciómetro (tensión continua) se reemplaza por un **Wave Generator** en modo Wav.
+  Reproduce `sirena.wav` (barrido 650–1300 Hz), no un umbral estático.
 - **Reset del Uno a +5 V.** En SimulIDE el pull-up interno del AVR no está simulado;
   sin esto el MCU puede quedar en reset.
 - Resistencias de LED **220 Ω** (equivalente práctico a las de 200 Ω; corriente ~13 mA).
-- Senoidal **centrada en 2,5 V ± 2 V** para que el ADC trabaje alrededor de 512,
-  que es lo que espera Goertzel.
+- El WAV va **centrado en 2,5 V ± 2 V** para que la onda entre en 0,5–4,5 V
+  y el ADC trabaje alrededor de 512, que es lo que espera Goertzel.
 - Cátodos de los 6 LEDs al **GND del Arduino** (una sola malla de masa).
 - WaveGen con **Always On = no**: el botón izquierdo es la sirena.
 
@@ -56,12 +56,23 @@ Cada LED: Arduino pin → resistor 220 Ω → ánodo del LED. Cátodo → GND de
 
 ## Wave Generator (sirena)
 
-Clic derecho → Properties:
+El archivo es `sirena.wav`, en la raíz del repo, al lado de `Citcuito1.sim1`.
+PCM 16 bit, mono, 8000 Hz, barrido entre 650 y 1300 Hz. Para regenerarlo:
+
+```powershell
+powershell -NoProfile -File simulide\generar_sirena.ps1
+```
+
+Si guardás el circuito en otra carpeta, copiá `sirena.wav` ahí. En la propiedad
+va solo el nombre, sin ruta.
+
+Clic derecho en el WaveGen → Properties. La propiedad del archivo aparece al
+elegir Wave type = Wav:
 
 | Propiedad | Valor |
 |-----------|--------|
-| Wave type | Sine |
-| Frequency | 1000 Hz |
+| Wave type | Wav |
+| Input File | `sirena.wav` |
 | Always On | **no** |
 | Middle Voltage | 2.5 V |
 | Semi amplitude | 2 V |
@@ -69,11 +80,11 @@ Clic derecho → Properties:
 Salida del WaveGen al pin **A0**. Masa del circuito = GND del Uno.
 
 Para probar: con la simulación corriendo, el botón de la izquierda del WaveGen
-enciende/apaga la senoidal.
+enciende/apaga el WAV.
 
-- **On + 1000 Hz** → LCD "AMBULANCIA DETECTADA!", C1 verde, C2 rojo.
-- **Off** → a los ~25 ms (3 ventanas) vuelve el ciclo normal.
-- Prueba negativa: Frequency **200 Hz**, On → no debe disparar.
+- **On** → LCD "AMBULANCIA DETECTADA!", carril 1 verde, carril 2 rojo.
+- **Off** → a las 25 ventanas sin señal vuelve el ciclo normal.
+- En el osciloscopio de A0: onda centrada en ~2,5 V, barriendo alrededor de 1 kHz.
 
 ## LCD I2C (dirección 0x27)
 
@@ -139,7 +150,7 @@ Cada vez que cambies el sketch: `pio run` y después Power en SimulIDE.
 3. `pio run` en este proyecto.
 4. Load firmware + Reload HEX at start.
 5. Botón Power (arriba).
-6. Encendé el WaveGen: tiene que cortar el ciclo y dar paso al carril 1.
+6. Encendé el WaveGen (botón izquierdo): `sirena.wav` tiene que cortar el ciclo y dar paso al carril 1.
 
 ## Si el LCD I2C pelea
 

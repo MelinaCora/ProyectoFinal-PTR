@@ -53,6 +53,65 @@ Expect-True "1000 Hz sine is detected as siren" (Test-SirenDetected $s1000)
 Expect-True "200 Hz sine is not a siren" (-not (Test-SirenDetected (New-Sine 200 400)))
 Expect-True "silence is not a siren" (-not (Test-SirenDetected (New-Object double[] $n)))
 
+function Read-WavPcm16([string]$path) {
+  $bytes = [System.IO.File]::ReadAllBytes($path)
+  if ([System.Text.Encoding]::ASCII.GetString($bytes, 0, 4) -ne "RIFF") {
+    throw "not a RIFF file: $path"
+  }
+  $channels = 0
+  $rate = 0
+  $bits = 0
+  $pcm = New-Object System.Collections.Generic.List[double]
+  $i = 12
+  while ($i + 8 -le $bytes.Length) {
+    $id = [System.Text.Encoding]::ASCII.GetString($bytes, $i, 4)
+    $size = [BitConverter]::ToInt32($bytes, $i + 4)
+    $body = $i + 8
+    if ($id -eq "fmt ") {
+      $format = [BitConverter]::ToInt16($bytes, $body)
+      $channels = [BitConverter]::ToInt16($bytes, $body + 2)
+      $rate = [BitConverter]::ToInt32($bytes, $body + 4)
+      $bits = [BitConverter]::ToInt16($bytes, $body + 14)
+      if ($format -ne 1) { throw "WAV is not PCM" }
+    } elseif ($id -eq "data") {
+      $count = [int]($size / 2)
+      for ($s = 0; $s -lt $count; $s++) {
+        $pcm.Add([double][BitConverter]::ToInt16($bytes, $body + (2 * $s)))
+      }
+    }
+    $i = $body + $size
+    if (($size % 2) -ne 0) { $i++ }
+  }
+  return @{ Samples = $pcm.ToArray(); Channels = $channels; Rate = $rate; Bits = $bits }
+}
+
+$wavPath = Join-Path (Split-Path $PSScriptRoot -Parent) "sirena.wav"
+$wav = Read-WavPcm16 $wavPath
+Expect-True "siren wav is PCM 16-bit mono at 8000 Hz" (
+  ($wav.Channels -eq 1) -and ($wav.Rate -eq 8000) -and ($wav.Bits -eq 16) -and ($wav.Samples.Length -gt $n))
+
+# WaveGen: mid 2.5 V, semi amplitude 2 V. ADC span is 0-5 V = 0-1023.
+$adcScale = (2.0 / 5.0) * 1023.0 / 32767.0
+$consecutive = 0
+$maxConsecutive = 0
+for ($start = 0; ($start + $n) -le $wav.Samples.Length; $start += $n) {
+  $window = New-Object double[] $n
+  $mean = 0.0
+  for ($j = 0; $j -lt $n; $j++) {
+    $window[$j] = $wav.Samples[$start + $j] * $adcScale
+    $mean += $window[$j]
+  }
+  $mean /= $n
+  for ($j = 0; $j -lt $n; $j++) { $window[$j] -= $mean }
+  if (Test-SirenDetected $window) {
+    $consecutive++
+    if ($consecutive -gt $maxConsecutive) { $maxConsecutive = $consecutive }
+  } else {
+    $consecutive = 0
+  }
+}
+Expect-True "siren wav is detected for 2 consecutive windows" ($maxConsecutive -ge 2)
+
 if ($failed -gt 0) {
   Write-Host "$failed test(s) failed"
   exit 1
