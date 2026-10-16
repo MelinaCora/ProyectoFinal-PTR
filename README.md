@@ -17,13 +17,30 @@ El ciclo normal consta de cuatro fases:
 | 4    | Rojo                  | Amarillo              | 2 s      |
 
 El firmware toma ventanas de 64 muestras y mide la frecuencia de muestreo real
-de esa ventana. Analiza las bandas 750, 1000 y 1250 Hz. Dos ventanas
-consecutivas con señal en esas bandas interrumpen el ciclo: el carril A queda
-en verde y el carril B en rojo. Al dejar de detectar la señal durante 25
-ventanas, se reanuda el ciclo normal.
+de esa ventana. Busca un pico tonal en las bandas 650, 800, 950, 1100 y
+1250 Hz. Para entrar en modo ambulancia tiene que ver un tono grave y uno
+agudo del barrido en unos 2 s: un sonido fuerte o un tono fijo no alcanza.
+El carril A queda en verde y el carril B en rojo. El tiempo de la fase
+interrumpida se congela: la ambulancia no lo consume. Al dejar de detectar
+tono en la banda durante 25 ventanas, se retoma esa fase:
+
+| Interrupción en | Entrada a prioridad | Al terminar la ambulancia |
+|-----------------|---------------------|---------------------------|
+| A verde | A verde / B rojo de inmediato | Sigue el verde de A con el tiempo que faltaba |
+| A amarillo | A verde / B rojo de inmediato | Amarillo de A (2 s) y después verde de B completo |
+| B verde | Amarillo de B (2 s) y después A verde / B rojo | Amarillo de A (2 s) y después verde de B con el tiempo congelado |
+| B amarillo | Termina el amarillo de B y después A verde / B rojo | Verde de A completo (5 s); el turno de B ya estaba cerrando |
+
+Si la sirena se corta durante el amarillo de entrada de B, se cancela la
+prioridad y B recupera su verde con el tiempo congelado. Si vuelve durante
+el amarillo de salida de A, se reentra en prioridad y el verde de B sigue
+pendiente con el mismo resto.
 
 Con el Wave Generator apagado el LCD muestra `FUNCIONAMIENTO` / `NORMAL`.
-Con la sirena detectada muestra `AMBULANCIA` / `DETECTADA!`.
+Con el patrón confirmado (y durante el despeje de entrada de B) muestra
+`AMBULANCIA` y en la segunda línea el tiempo de respuesta, por ejemplo
+`RESPUESTA 4200ms`, desde que `A0` empezó a moverse hasta ese cambio. En el
+amarillo de salida de A vuelve a `FUNCIONAMIENTO` / `NORMAL`.
 
 ## Componentes del circuito
 
@@ -58,12 +75,13 @@ en [`simulide/ARMADO.md`](simulide/ARMADO.md).
 
 ## Sirena
 
-`AMBULANCIA` / `DETECTADA!` lo dispara [`sirena.wav`](sirena.wav), en la raíz
-del proyecto, junto a `Citcuito1.sim1`. Es PCM de 16 bit, mono, a 8000 Hz, de
-20 segundos. El tono sigue barriendo entre 650 y 1300 Hz. Lo que cambia es la
-energía: 4 s muy baja (lejos), 4 s de acercamiento, 4 s en el pico, 4 s
-alejándose y 4 s otra vez lejos. El sketch no cambia; entra en modo ambulancia
-solo cuando esa energía supera el umbral.
+El modo ambulancia lo dispara el patrón de [`sirena.wav`](sirena.wav), en la
+raíz del proyecto, junto a `Citcuito1.sim1`. Es PCM de 16 bit, mono, a 8000 Hz,
+de 20 segundos. El tono barre entre 650 y 1300 Hz. La amplitud simula la
+distancia: 4 s muy baja (lejos), 4 s de acercamiento, 4 s en el pico, 4 s
+alejándose y 4 s otra vez lejos. El reloj de respuesta arranca cuando `A0`
+deja el silencio; el semáforo cambia recién cuando el barrido confirma grave
+y agudo, no al tocar el botón del WaveGen.
 
 En el Wave Generator de SimulIDE:
 
@@ -129,14 +147,17 @@ Start** para que se cargue el firmware al iniciar la simulación.
 Iniciá la simulación con **Power** y usá el botón izquierdo del Wave Generator:
 
 - Al encenderlo, los primeros segundos la sirena está lejos: el ciclo sigue normal.
-- En el pico de volumen entra el modo ambulancia.
-- Cuando se aleja y la energía baja, vuelven las 25 ventanas sin detección y el ciclo normal.
-- Apagado: también corta la detección y, tras esas ventanas, vuelve el ciclo normal.
+- Cuando el barrido confirma grave y agudo (cerca del pico), entra el modo ambulancia.
+- El LCD muestra `AMBULANCIA` y `RESPUESTA xxxxms` (desde el primer movimiento de `A0`).
+- Cuando se aleja y ya no hay tono en la banda, a las 25 ventanas retoma la fase
+  que se había interrumpido (con despejes en amarillo si hace falta).
+- Apagado: también corta la detección y, tras esas ventanas, retoma esa fase.
 
 En el osciloscopio de `A0` la onda tiene que verse centrada en unos 2,5 V,
 barriendo alrededor de 1 kHz, con amplitud que crece y después decrece.
+Recompilá y volvé a cargar el `.hex` después de este cambio.
 
-## Prueba opcional del detector
+## Prueba opcional del detector y del ciclo
 
 La prueba de Goertzel se puede ejecutar en PowerShell sin conectar hardware:
 
@@ -144,8 +165,23 @@ La prueba de Goertzel se puede ejecutar en PowerShell sin conectar hardware:
 powershell -NoProfile -File test\test_goertzel.ps1
 ```
 
-Comprueba la detección de 1000 Hz, que 200 Hz y el silencio no se detecten, y
-que `sirena.wav` no dispare de lejos, sí en el pico y no otra vez al alejarse.
+Comprueba que un tono fijo de 1000 Hz, 200 Hz y el silencio no confirmen el
+patrón, y que `sirena.wav` no dispare de lejos, sí en el pico y no otra vez al
+alejarse.
+
+La lógica de fases e interrupción (`src/ciclo.h`) se prueba en el host con
+`test/test_ciclo.cpp`. Si hay un `g++` en el PATH:
+
+```powershell
+pio run -e test_ciclo
+.pio\build\test_ciclo\program.exe
+```
+
+También:
+
+```powershell
+node test\test_ciclo.mjs
+```
 
 ## Problemas comunes
 
@@ -163,4 +199,5 @@ que `sirena.wav` no dispare de lejos, sí en el pico y no otra vez al alejarse.
 - **No se detecta la sirena:** el Wave Generator tiene que estar en modo Wav,
   conectado a A0, con Input File `sirena.wav` (el archivo en la misma carpeta
   que el circuito), tensión central de 2.5 V y amplitud de 2 V. El botón
-  izquierdo tiene que estar encendido.
+  izquierdo tiene que estar encendido. Esperá el pico del barrido: un tono
+  fijo no dispara. Recompilá y recargá el `.hex` si el firmware es anterior.

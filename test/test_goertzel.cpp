@@ -36,16 +36,44 @@ int main() {
   int16_t samples[GOERTZEL_N];
 
   fill_sine(samples, n, 1000.0f, fs, 400.0f);
-  const float p1000 = goertzel_power(samples, n, 1000.0f, fs);
-  const float p200 = goertzel_power(samples, n, 200.0f, fs);
-  expect_true("1000 Hz sine has much more power at 1000 Hz than at 200 Hz", p1000 > p200 * 10.0f);
-  expect_true("1000 Hz sine is detected as siren", siren_detected(samples, n, fs));
+  const float p950 = goertzel_power(samples, n, 950.0f, fs);
+  const float p650 = goertzel_power(samples, n, 650.0f, fs);
+  expect_true("1000 Hz sine has much more power near 950 Hz than at 650 Hz", p950 > p650 * 10.0f);
 
-  fill_sine(samples, n, 200.0f, fs, 400.0f);
-  expect_true("200 Hz sine is not a siren", !siren_detected(samples, n, fs));
+  SirenEar ear;
+  ear.reset();
+  bool confirmed = false;
+  for (int w = 0; w < 40; w++) {
+    fill_sine(samples, n, 1000.0f, fs, 400.0f);
+    if (ear.feed(siren_tone(samples, n, fs), (uint32_t)(w * 8))) {
+      confirmed = true;
+    }
+  }
+  expect_true("1000 Hz sine is not a siren pattern", !confirmed);
+
+  ear.reset();
+  confirmed = false;
+  for (int w = 0; w < 40; w++) {
+    fill_sine(samples, n, 200.0f, fs, 400.0f);
+    if (ear.feed(siren_tone(samples, n, fs), (uint32_t)(w * 8))) {
+      confirmed = true;
+    }
+  }
+  expect_true("200 Hz sine is not a siren pattern", !confirmed);
 
   fill_silence(samples, n);
-  expect_true("silence is not a siren", !siren_detected(samples, n, fs));
+  ear.reset();
+  expect_true("silence is not a siren pattern", !ear.feed(siren_tone(samples, n, fs), 0));
+
+  ear.reset();
+  confirmed = false;
+  fill_sine(samples, n, 650.0f, fs, 400.0f);
+  ear.feed(siren_tone(samples, n, fs), 0);
+  fill_sine(samples, n, 1250.0f, fs, 400.0f);
+  if (ear.feed(siren_tone(samples, n, fs), 500)) {
+    confirmed = true;
+  }
+  expect_true("low then high confirms siren pattern", confirmed);
 
   if (g_failed) {
     std::printf("%d test(s) failed\n", g_failed);

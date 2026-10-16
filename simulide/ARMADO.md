@@ -83,9 +83,11 @@ Salida del WaveGen al pin **A0**. Masa del circuito = GND del Uno.
 Para probar: con la simulación corriendo, el botón de la izquierda del WaveGen
 enciende/apaga el WAV.
 
-- **On, lejos:** el ciclo sigue normal. La energía todavía no alcanza el umbral.
-- **On, en el pico:** LCD "AMBULANCIA DETECTADA!", carril 1 verde, carril 2 rojo.
-- **On, al alejarse:** a las 25 ventanas sin detección vuelve el ciclo normal.
+- **On, lejos:** el ciclo sigue normal. Todavía no hay patrón de barrido.
+- **On, en el pico:** el barrido confirma grave y agudo. LCD `AMBULANCIA` /
+  `RESPUESTA xxxxms`, carril 1 verde, carril 2 rojo. Ese tiempo cuenta desde
+  que A0 empezó a moverse, no desde el clic del botón.
+- **On, al alejarse:** a las 25 ventanas sin tono en la banda vuelve el ciclo normal.
 - En el osciloscopio de A0: onda centrada en ~2,5 V, barriendo alrededor de 1 kHz, con amplitud que sube y baja.
 
 ## LCD I2C (dirección 0x27)
@@ -152,7 +154,8 @@ Cada vez que cambies el sketch: `pio run` y después Power en SimulIDE.
 3. `pio run` en este proyecto.
 4. Load firmware + Reload HEX at start.
 5. Botón Power (arriba).
-6. Encendé el WaveGen (botón izquierdo): `sirena.wav` tiene que cortar el ciclo y dar paso al carril 1.
+6. Encendé el WaveGen (botón izquierdo): al confirmar el barrido, `sirena.wav`
+   corta el ciclo, da paso al carril 1 y el LCD muestra el tiempo de respuesta.
 
 ## Si el LCD I2C pelea
 
