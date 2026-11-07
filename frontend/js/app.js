@@ -5,6 +5,7 @@ import {
   getMetrics,
   getState,
 } from "./api.js";
+import { classifyBackendStatus } from "./backend-status.js";
 import { calculateMetrics } from "./metrics.js";
 import { connectMonitor } from "./websocket.js";
 
@@ -32,6 +33,9 @@ const state = {
     health: null,
     apiAvailable: false,
     websocketConnected: false,
+    backendStatus: "checking",
+    resourceErrors: {},
+    incidentsLoaded: false,
   },
   activeView: "resumen",
   search: "",
@@ -43,6 +47,12 @@ const state = {
   staleTimer: null,
   alertTimer: null,
   clockTimer: null,
+  healthTimer: null,
+  incidentRefreshTimer: null,
+  refreshPromise: null,
+  healthFailures: 0,
+  lastApiSuccessAt: null,
+  websocketHasConnected: false,
   backendError: null,
 };
 
@@ -374,7 +384,7 @@ async function renderIncidentDetail(rowId) {
       </dl>
       <div class="dialog-events"><p class="eyebrow">EVENTOS DEL INCIDENTE</p>${detail.length ? detail.map((event) => `<div class="dialog-event"><span class="activity-marker activity-marker--${event.type === "EMERGENCIA_DETECTADA" ? "amber" : event.type === "FALLO_SEGURO" ? "red" : "green"}" aria-hidden="true"></span><div><strong>${escapeHTML(eventLabel(event.type))}</strong><span>${escapeHTML(formatDate(event.received_at))}<span class="event-separator">·</span>uptime ${escapeHTML(formatDuration(event.arduino_uptime_ms))}</span></div></div>`).join("") : `<div class="empty-state empty-state--compact"><span>Sin eventos disponibles.</span></div>`}</div>`;
   } catch (error) {
-    showBackendError(error);
+    reportApiFailure("detalle", error);
     if ($("#incident-dialog").open) {
       $("#dialog-title").textContent = `Incidente #${escapeHTML(rowId)}`;
       $("#dialog-content").innerHTML = `<div class="empty-state empty-state--compact"><strong>No se pudo cargar el detalle</strong><span>${escapeHTML(error.message)}</span></div>`;
@@ -448,14 +458,23 @@ function updateConnectionIndicator() {
   const data = state.data;
   let text;
   let tone;
-  if (!data.apiAvailable) {
-    text = data.websocketConnected ? "API REST no disponible" : "Backend no disponible";
-    tone = data.websocketConnected ? "amber" : "red";
+  if (data.backendStatus === "unavailable") {
+    text = "Backend no disponible";
+    tone = "red";
+  } else if (data.backendStatus === "temporary") {
+    text = "Backend con fallos temporales";
+    tone = "amber";
+  } else if (!data.apiAvailable) {
+    text = "Conectando con backend";
+    tone = "amber";
   } else if (!data.state.serial_connected) {
     text = "Arduino desconectado";
     tone = "red";
   } else if (data.state.state_stale || !data.state.controller_observed) {
     text = "Telemetría desactualizada";
+    tone = "amber";
+  } else if (!data.websocketConnected) {
+    text = "WebSocket desconectado";
     tone = "amber";
   } else {
     text = "Controlador observado";
@@ -465,24 +484,38 @@ function updateConnectionIndicator() {
   dot.className = `status-dot status-dot--${tone}`;
 
   const banner = $("#backend-status-banner");
-  banner.classList.toggle("backend-status-banner--error", !data.apiAvailable);
-  banner.classList.toggle("backend-status-banner--warning", data.apiAvailable && tone !== "green");
+  banner.classList.toggle("backend-status-banner--error", data.backendStatus === "unavailable");
+  banner.classList.toggle(
+    "backend-status-banner--warning",
+    data.backendStatus === "temporary"
+      || (data.backendStatus !== "unavailable" && tone !== "green"),
+  );
   const heading = $("#backend-status-title");
   const description = $("#backend-status-description");
-  if (!data.apiAvailable) {
-    heading.textContent = data.websocketConnected ? "API REST NO DISPONIBLE" : "BACKEND NO DISPONIBLE";
-    description.textContent = data.websocketConnected
-      ? "El WebSocket está conectado, pero no se pueden consultar el historial ni las métricas REST."
-      : "No se pudieron consultar FastAPI ni los datos persistidos.";
+  if (data.backendStatus === "unavailable") {
+    heading.textContent = "BACKEND NO DISPONIBLE";
+    description.textContent = "Fallaron varias verificaciones consecutivas de FastAPI.";
+  } else if (data.backendStatus === "temporary") {
+    heading.textContent = "FALLO TEMPORAL DE COMUNICACIÓN";
+    const failedResources = Object.keys(data.resourceErrors).join(", ");
+    description.textContent = failedResources
+      ? `Reintento automático; fallo puntual en: ${failedResources}.`
+      : "Una consulta falló; FastAPI respondió recientemente y se reintentará.";
+  } else if (!data.apiAvailable) {
+    heading.textContent = "CONECTANDO CON FASTAPI";
+    description.textContent = "Consultando estado e historial persistido…";
   } else if (!data.state.serial_connected) {
     heading.textContent = "SIN CONEXIÓN SERIAL";
     description.textContent = "FastAPI responde; no hay conexión informada con el controlador.";
   } else if (data.state.state_stale || !data.state.controller_observed) {
     heading.textContent = "TELEMETRÍA DESACTUALIZADA";
     description.textContent = "El backend está disponible, pero no observa señales recientes del controlador.";
+  } else if (!data.websocketConnected) {
+    heading.textContent = "WEBSOCKET DESCONECTADO";
+    description.textContent = "REST está disponible; intentando restablecer las actualizaciones en vivo.";
   } else {
     heading.textContent = "MONITOREO EN VIVO";
-    description.textContent = "Estado y métricas obtenidos del backend; sin controles remotos.";
+    description.textContent = "Estado actualizado por WebSocket; historial y métricas consultados por REST.";
   }
 }
 
@@ -497,19 +530,44 @@ function updateIncidentAlert(event) {
   state.alertTimer = window.setTimeout(() => { alert.hidden = true; }, 8000);
 }
 
-function showBackendError(error) {
-  const firstFailure = state.data.apiAvailable || state.backendError !== error.message;
-  if (firstFailure) console.error("No se pudo completar la consulta a FastAPI:", error);
-  state.backendError = error.message;
-  state.data.apiAvailable = false;
-  state.data.state = {
-    ...state.data.state,
-    controller_observed: false,
-    state_stale: true,
-    restante_ms: null,
-  };
+function reportApiFailure(resource, error) {
+  const message = error instanceof Error ? error.message : String(error);
+  if (state.data.resourceErrors[resource] !== message) {
+    console.error(`Falló la consulta REST de ${resource}:`, error);
+  }
+  state.data.resourceErrors[resource] = message;
+  if (resource === "health") {
+    state.healthFailures += 1;
+  }
+  state.data.backendStatus = classifyBackendStatus({
+    healthFailures: state.healthFailures,
+    lastApiSuccessAt: state.lastApiSuccessAt,
+    resourceErrors: state.data.resourceErrors,
+  });
+  if (state.data.backendStatus === "unavailable") {
+    state.data.apiAvailable = false;
+    state.data.state = {
+      ...state.data.state,
+      controller_observed: false,
+      state_stale: true,
+      restante_ms: null,
+    };
+  }
   updateConnectionIndicator();
   renderAll();
+}
+
+function reportApiSuccess(resource) {
+  delete state.data.resourceErrors[resource];
+  state.lastApiSuccessAt = Date.now();
+  state.data.apiAvailable = true;
+  if (resource === "health") state.healthFailures = 0;
+  state.data.backendStatus = classifyBackendStatus({
+    healthFailures: state.healthFailures,
+    lastApiSuccessAt: state.lastApiSuccessAt,
+    resourceErrors: state.data.resourceErrors,
+  });
+  state.backendError = null;
 }
 
 function mapIncidentEvent(event, incidentId) {
@@ -549,7 +607,6 @@ function acceptWebSocketMessage(message) {
     acceptSnapshot(data);
     updateConnectionIndicator();
     renderAll();
-    refreshFromApi({ includeIncidents: !state.data.apiAvailable });
     return;
   }
   if (message.type === "state" || message.type === "heartbeat") {
@@ -570,7 +627,7 @@ function acceptWebSocketMessage(message) {
       active_session_id: data.session_id || state.data.state.active_session_id,
       serial_connected: true,
       controller_observed: isHeartbeat ? true : state.data.state.controller_observed,
-      state_stale: isHeartbeat ? false : isBoot || state.data.state.state_stale,
+      state_stale: isHeartbeat ? false : isBoot,
     };
     if (message.type === "state") {
       mergeEvents([{
@@ -602,6 +659,13 @@ function acceptWebSocketMessage(message) {
 async function loadRecentEvents(incidents) {
   const latest = incidents.slice(0, 5);
   const details = await Promise.allSettled(latest.map((incident) => getIncident(incident.id)));
+  const failed = details.some((result) => result.status !== "fulfilled");
+  if (failed) {
+    const failure = details.find((result) => result.status === "rejected");
+    reportApiFailure("detalles", failure.reason);
+  } else {
+    reportApiSuccess("detalles");
+  }
   const events = details.flatMap((result, index) => {
     if (result.status !== "fulfilled") return [];
     const incident = latest[index];
@@ -613,55 +677,99 @@ async function loadRecentEvents(incidents) {
   mergeEvents(events);
 }
 
-async function refreshFromApi({ includeIncidents = false, includeRecentEvents = false } = {}) {
+async function loadResource(resource, request, apply) {
   try {
-    const [health, currentState, metrics] = await Promise.all([
-      getHealth(),
-      getState(),
-      getMetrics(),
-    ]);
-    const incidents = includeIncidents || !state.data.apiAvailable
-      ? await getAllIncidents()
-      : { items: state.data.incidents };
-    state.backendError = null;
-    state.data = {
-      ...state.data,
-      state: { ...UNKNOWN_STATE, ...currentState },
-      incidents: incidents.items,
-      metrics,
-      health,
-      apiAvailable: true,
-    };
-    if (includeRecentEvents) await loadRecentEvents(incidents.items);
-    updateConnectionIndicator();
-    renderAll();
+    const value = await request();
+    reportApiSuccess(resource);
+    apply(value);
+    return true;
   } catch (error) {
-    showBackendError(error);
+    reportApiFailure(resource, error);
+    return false;
   }
 }
 
-async function refreshIncidentsAndMetrics() {
-  try {
-    const [health, metrics, currentState, incidentsResponse] = await Promise.all([
-      getHealth(),
-      getMetrics(),
-      getState(),
-      getAllIncidents(),
-    ]);
-    state.backendError = null;
-    state.data = {
-      ...state.data,
-      health,
-      metrics,
-      state: { ...UNKNOWN_STATE, ...currentState },
-      incidents: incidentsResponse.items,
-      apiAvailable: true,
-    };
+async function refreshFromApi({ includeIncidents = false, includeRecentEvents = false } = {}) {
+  if (state.refreshPromise) return state.refreshPromise;
+  state.refreshPromise = (async () => {
+    const healthRequest = loadResource("health", getHealth, (health) => {
+      state.data.health = health;
+    });
+    const stateRequest = !state.data.websocketConnected
+      ? loadResource("estado", getState, (currentState) => {
+        state.data.state = { ...UNKNOWN_STATE, ...currentState };
+      })
+      : Promise.resolve(true);
+    const metricsRequest = loadResource("métricas", getMetrics, (metrics) => {
+      state.data.metrics = metrics;
+    });
+    const incidentsRequest = includeIncidents || !state.data.incidentsLoaded
+      ? loadResource("historial", getAllIncidents, (result) => {
+        state.data.incidents = result.items;
+        state.data.incidentsLoaded = true;
+      })
+      : Promise.resolve(true);
+
+    await Promise.all([healthRequest, stateRequest, metricsRequest, incidentsRequest]);
+    if (includeRecentEvents && state.data.incidentsLoaded) {
+      await loadRecentEvents(state.data.incidents);
+    }
     updateConnectionIndicator();
     renderAll();
-  } catch (error) {
-    showBackendError(error);
+  })();
+  try {
+    await state.refreshPromise;
+  } finally {
+    state.refreshPromise = null;
   }
+}
+
+async function refreshHealth() {
+  const healthy = await loadResource("health", getHealth, (health) => {
+    state.data.health = health;
+  });
+  if (!healthy) return;
+  if (state.data.resourceErrors["estado"] && !state.data.websocketConnected) {
+    await loadResource("estado", getState, (currentState) => {
+      state.data.state = { ...UNKNOWN_STATE, ...currentState };
+    });
+  }
+  if (state.data.resourceErrors["métricas"] || !state.data.metrics) {
+    await loadResource("métricas", getMetrics, (metrics) => {
+      state.data.metrics = metrics;
+    });
+  }
+  if (state.data.resourceErrors["historial"] || !state.data.incidentsLoaded) {
+    await loadResource("historial", getAllIncidents, (result) => {
+      state.data.incidents = result.items;
+      state.data.incidentsLoaded = true;
+    });
+  }
+  if (state.data.resourceErrors["detalles"] && state.data.incidentsLoaded) {
+    await loadRecentEvents(state.data.incidents);
+  }
+  updateConnectionIndicator();
+  renderAll();
+}
+
+function refreshIncidentsAndMetrics() {
+  if (state.incidentRefreshTimer !== null) {
+    window.clearTimeout(state.incidentRefreshTimer);
+  }
+  state.incidentRefreshTimer = window.setTimeout(async () => {
+    state.incidentRefreshTimer = null;
+    await Promise.all([
+      loadResource("historial", getAllIncidents, (result) => {
+        state.data.incidents = result.items;
+        state.data.incidentsLoaded = true;
+      }),
+      loadResource("métricas", getMetrics, (metrics) => {
+        state.data.metrics = metrics;
+      }),
+    ]);
+    updateConnectionIndicator();
+    renderAll();
+  }, 200);
 }
 
 function switchView(view) {
@@ -738,6 +846,9 @@ state.disconnectSocket = connectMonitor({
   onStatus(status) {
     if (status === "connected") {
       state.data.websocketConnected = true;
+      const reconnect = state.websocketHasConnected;
+      state.websocketHasConnected = true;
+      if (reconnect) refreshFromApi({ includeIncidents: true });
     } else if (status === "disconnected") {
       state.data.websocketConnected = false;
     } else if (status === "invalid-message") {
@@ -748,7 +859,7 @@ state.disconnectSocket = connectMonitor({
     renderMonitor();
   },
 });
-state.refreshTimer = window.setInterval(() => refreshFromApi(), 5000);
+state.healthTimer = window.setInterval(refreshHealth, 15_000);
 state.staleTimer = window.setInterval(() => {
   const stale = stateMeasurementStale(state.data.state);
   if (stale !== state.previousStale) {
@@ -761,8 +872,9 @@ state.staleTimer = window.setInterval(() => {
 state.clockTimer = window.setInterval(updateClock, 1000);
 window.addEventListener("beforeunload", () => {
   state.disconnectSocket?.();
-  window.clearInterval(state.refreshTimer);
+  window.clearInterval(state.healthTimer);
   window.clearInterval(state.staleTimer);
   window.clearInterval(state.clockTimer);
   window.clearTimeout(state.alertTimer);
+  window.clearTimeout(state.incidentRefreshTimer);
 });

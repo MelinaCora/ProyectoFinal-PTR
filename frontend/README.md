@@ -36,6 +36,20 @@ puede seguir disponible, pero el panel informa que no hay telemetría reciente
 y oculta el tiempo restante obsoleto. El historial y métricas se leen desde
 SQLite mediante los endpoints existentes.
 
+Un fallo aislado en una consulta se informa como temporal y no desconecta el
+backend si `/health` sigue respondiendo. La alerta de backend no disponible
+requiere fallos consecutivos de salud y ausencia de respuestas REST recientes.
+Después de actualizar FastAPI, reiniciarlo para que aplique el middleware CORS.
+Para comprobar el origen permitido desde PowerShell:
+
+```powershell
+curl.exe -i -H "Origin: http://localhost:8080" "http://localhost:8000/api/emergencias?limit=100&offset=0"
+```
+
+La respuesta debe incluir `Access-Control-Allow-Origin: http://localhost:8080`.
+En caso de fallo interno, los tests comprueban que la respuesta 500 también
+conserve esa cabecera.
+
 ## Pruebas
 
 Pruebas frontend, sin instalar dependencias:

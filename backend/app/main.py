@@ -89,8 +89,8 @@ def create_app(settings=None, serial_factory=None):
         description="API de solo lectura para eventos SIV v1.",
         lifespan=lifespan,
     )
-    app.add_middleware(
-        CORSMiddleware,
+    cors_app = CORSMiddleware(
+        app=app,
         allow_origins=[
             "http://localhost:8080",
             "http://127.0.0.1:8080",
@@ -137,7 +137,10 @@ def create_app(settings=None, serial_factory=None):
     async def monitor(websocket: WebSocket):
         await hub.serve(websocket)
 
-    return app
+    cors_app.state = app.state
+    cors_app.router = app.router
+    cors_app.openapi = app.openapi
+    return cors_app
 
 
 app = create_app()

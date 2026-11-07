@@ -11,6 +11,7 @@ async function request(path) {
   const response = await fetch(new URL(path, `${getApiBaseUrl()}/`), {
     headers: { Accept: "application/json" },
     cache: "no-store",
+    signal: AbortSignal.timeout(8000),
   });
   if (!response.ok) {
     throw new Error(`FastAPI respondió ${response.status} en ${path}`);

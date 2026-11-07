@@ -6,6 +6,7 @@ import time
 import unittest
 from contextlib import closing
 from pathlib import Path
+from unittest.mock import patch
 
 from httpx import ASGITransport, AsyncClient
 from starlette.testclient import TestClient
@@ -169,6 +170,10 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(
             self.request("GET", "/api/emergencias?limit=0").status_code, 422
         )
+        self.assertEqual(
+            self.request("GET", "/api/emergencias?limit=100&offset=0").json(),
+            {"items": [], "total": 0, "limit": 100, "offset": 0},
+        )
 
     def test_cors_is_limited_to_local_dashboard_origins(self):
         with TestClient(self.app) as client:
@@ -190,6 +195,22 @@ class ApiTests(unittest.TestCase):
         )
         self.assertNotIn("access-control-allow-origin", rejected.headers)
 
+    def test_internal_error_response_keeps_cors_headers(self):
+        with patch.object(
+            self.app.state.store,
+            "list_incidents",
+            side_effect=sqlite3.OperationalError("database is locked"),
+        ):
+            with TestClient(self.app, raise_server_exceptions=False) as client:
+                response = client.get(
+                    "/api/emergencias?limit=100&offset=0",
+                    headers={"Origin": "http://localhost:8080"},
+                )
+        self.assertEqual(response.status_code, 500)
+        self.assertEqual(
+            response.headers["access-control-allow-origin"], "http://localhost:8080"
+        )
+
     def test_history_detail_pagination_and_metrics(self):
         store = self.app.state.store
         for sequence, incident_id, response in ((1, 21, 100), (2, 22, 300)):
@@ -204,6 +225,11 @@ class ApiTests(unittest.TestCase):
         history = self.request("GET", "/api/emergencias?limit=1&offset=0").json()
         self.assertEqual(history["total"], 2)
         self.assertEqual(history["limit"], 1)
+        full_history = self.request(
+            "GET", "/api/emergencias?limit=100&offset=0"
+        ).json()
+        self.assertEqual(full_history["total"], 2)
+        self.assertEqual(len(full_history["items"]), 2)
         newest_id = history["items"][0]["id"]
         detail = self.request("GET", "/api/emergencias/{}".format(newest_id))
         self.assertEqual(detail.status_code, 200)
