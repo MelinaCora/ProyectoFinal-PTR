@@ -7,40 +7,55 @@ frecuencia con Goertzel y, al detectar la sirena, da prioridad al carril A.
 
 ## Funcionamiento
 
-El ciclo normal consta de cuatro fases:
+El ciclo normal alterna los dos carriles. Cada cambio de derecho de paso pasa
+por un intervalo configurable de **1 s con ambos semáforos en rojo** (valor
+académico de simulación, no normativo para tránsito real):
 
 | Fase | Carril A (semáforo 1) | Carril B (semáforo 2) | Duración |
 |------|-----------------------|-----------------------|----------|
-| 1    | Verde                 | Rojo                  | 5 s      |
-| 2    | Amarillo              | Rojo                  | 2 s      |
-| 3    | Rojo                  | Verde                 | 5 s      |
-| 4    | Rojo                  | Amarillo              | 2 s      |
+| Verde A | Verde                 | Rojo                  | 5 s      |
+| Amarillo A | Amarillo          | Rojo                  | 2 s      |
+| Seguridad hacia B | Rojo       | Rojo                  | 1 s      |
+| Verde B | Rojo                  | Verde                 | 5 s      |
+| Amarillo B | Rojo              | Amarillo              | 2 s      |
+| Seguridad hacia A | Rojo       | Rojo                  | 1 s      |
 
 El firmware toma ventanas de 64 muestras y mide la frecuencia de muestreo real
 de esa ventana. Busca un pico tonal en las bandas 650, 800, 950, 1100 y
 1250 Hz. Para entrar en modo ambulancia tiene que ver un tono grave y uno
 agudo del barrido en unos 2 s: un sonido fuerte o un tono fijo no alcanza.
-El carril A queda en verde y el carril B en rojo. El tiempo de la fase
-interrumpida se congela: la ambulancia no lo consume. Al dejar de detectar
-tono en la banda durante 25 ventanas, se retoma esa fase:
+La prioridad es exclusiva del carril A y no habilita A mientras B siga en
+verde o amarillo. Una solicitud confirmada queda pendiente hasta ser atendida;
+las detecciones repetidas no reinician la secuencia. Durante prioridad, la
+sirena se considera finalizada después de 25 ventanas consecutivas sin tono.
+El resto del verde interrumpido se conserva cuando aplica; las fases amarillas
+se completan antes de cambiar de derecho de paso:
 
 | Interrupción en | Entrada a prioridad | Al terminar la ambulancia |
 |-----------------|---------------------|---------------------------|
-| A verde | A verde / B rojo de inmediato | Sigue el verde de A con el tiempo que faltaba |
-| A amarillo | A verde / B rojo de inmediato | Amarillo de A (2 s) y después verde de B completo |
-| B verde | Amarillo de B (2 s) y después A verde / B rojo | Amarillo de A (2 s) y después verde de B con el tiempo congelado |
-| B amarillo | Termina el amarillo de B y después A verde / B rojo | Verde de A completo (5 s); el turno de B ya estaba cerrando |
+| A verde | Prioridad A inmediata | A retoma el verde con el tiempo restante |
+| A amarillo | Completa el amarillo, todo-rojo 1 s, prioridad A | Amarillo A 2 s, todo-rojo 1 s y verde B completo |
+| B verde | Amarillo B 2 s, todo-rojo 1 s, prioridad A | Amarillo A 2 s, todo-rojo 1 s y verde B con el tiempo restante |
+| B amarillo | Completa el amarillo, todo-rojo 1 s, prioridad A | A inicia un verde normal completo de 5 s |
+| Todo-rojo | Mantiene el intervalo restante y luego prioridad A | Continúa la recuperación asociada al cambio pendiente |
 
-Si la sirena se corta durante el amarillo de entrada de B, se cancela la
-prioridad y B recupera su verde con el tiempo congelado. Si vuelve durante
-el amarillo de salida de A, se reentra en prioridad y el verde de B sigue
-pendiente con el mismo resto.
+Las solicitudes confirmadas quedan enclavadas: aunque la sirena se interrumpa
+durante un despeje, la transición segura continúa y la prioridad se atiende.
 
-Con el Wave Generator apagado el LCD muestra `FUNCIONAMIENTO` / `NORMAL`.
-Con el patrón confirmado (y durante el despeje de entrada de B) muestra
-`AMBULANCIA` y en la segunda línea el tiempo de respuesta, por ejemplo
-`RESPUESTA 4200ms`, desde que `A0` empezó a moverse hasta ese cambio. En el
-amarillo de salida de A vuelve a `FUNCIONAMIENTO` / `NORMAL`.
+La fase `TODO_ROJO` utiliza un destino explícito (verde A, verde B o prioridad
+A), evitando duplicar estados. Si el estado interno resulta inválido o una
+actualización excede el límite de recuperación configurado, el controlador
+queda enclavado en `FALLO_SEGURO`, con ambos carriles en rojo; requiere reinicio
+para salir de ese estado. Al iniciar, las salidas también comienzan con ambos
+carriles en rojo mientras se inicializa el sistema.
+
+El LCD muestra `FUNCIONAMIENTO` / `NORMAL`, `AMBULANCIA` con el tiempo de
+respuesta, o `FALLO SEGURO` / `AMBOS EN ROJO`. El tiempo de respuesta se mide
+desde la confirmación del patrón de sirena hasta la activación efectiva de la
+prioridad A; si A ya está verde, la respuesta es inmediata. En el ciclo normal,
+el exceso de tiempo de una actualización se consume a través de las fases
+siguientes. Una demora extrema que supera el límite de transiciones provoca el
+estado seguro.
 
 ## Componentes del circuito
 
@@ -147,40 +162,46 @@ Start** para que se cargue el firmware al iniciar la simulación.
 Iniciá la simulación con **Power** y usá el botón izquierdo del Wave Generator:
 
 - Al encenderlo, los primeros segundos la sirena está lejos: el ciclo sigue normal.
-- Cuando el barrido confirma grave y agudo (cerca del pico), entra el modo ambulancia.
-- El LCD muestra `AMBULANCIA` y `RESPUESTA xxxxms` (desde el primer movimiento de `A0`).
-- Cuando se aleja y ya no hay tono en la banda, a las 25 ventanas retoma la fase
-  que se había interrumpido (con despejes en amarillo si hace falta).
+- Cuando el barrido confirma grave y agudo (cerca del pico), solicita prioridad A.
+- Si B tiene el paso, termina su amarillo y el todo-rojo de seguridad antes
+  de habilitar A; el LCD mide desde la confirmación hasta esa activación.
+- Cuando se aleja y ya no hay tono en la banda, tras 25 ventanas comienza la
+  recuperación segura y retoma la fase interrumpida cuando corresponde.
 - Apagado: también corta la detección y, tras esas ventanas, retoma esa fase.
 
 En el osciloscopio de `A0` la onda tiene que verse centrada en unos 2,5 V,
 barriendo alrededor de 1 kHz, con amplitud que crece y después decrece.
 Recompilá y volvé a cargar el `.hex` después de este cambio.
 
+## Diagnóstico UART
+
+El firmware emite una línea de diagnóstico por UART0 a 9600 baudios cada
+1000 ms de tiempo simulado. Para abrir el monitor interno de SimulIDE o probar
+un puerto COM externo, seguí
+[`docs/FASE_3A_COMUNICACION_SERIAL.md`](docs/FASE_3A_COMUNICACION_SERIAL.md).
+La salida es temporal y no constituye todavía el protocolo del dashboard.
+Para la alternativa sin controladores COM de Windows, consultá
+[`docs/FASE_3A_ALTERNATIVA_COMUNICACION.md`](docs/FASE_3A_ALTERNATIVA_COMUNICACION.md).
+
 ## Prueba opcional del detector y del ciclo
 
 La prueba de Goertzel se puede ejecutar en PowerShell sin conectar hardware:
 
 ```powershell
-powershell -NoProfile -File test\test_goertzel.ps1
+powershell -ExecutionPolicy Bypass -NoProfile -File test\test_goertzel.ps1
 ```
 
 Comprueba que un tono fijo de 1000 Hz, 200 Hz y el silencio no confirmen el
 patrón, y que `sirena.wav` no dispare de lejos, sí en el pico y no otra vez al
 alejarse.
 
-La lógica de fases e interrupción (`src/ciclo.h`) se prueba en el host con
-`test/test_ciclo.cpp`. Si hay un `g++` en el PATH:
-
-```powershell
-pio run -e test_ciclo
-.pio\build\test_ciclo\program.exe
-```
-
-También:
+La lógica de fases e interrupción (`src/ciclo.h`) se prueba siempre con el
+runner JavaScript. La prueba C++ adicional requiere `g++`:
 
 ```powershell
 node test\test_ciclo.mjs
+pio run -e test_ciclo
+.pio\build\test_ciclo\program.exe
 ```
 
 ## Problemas comunes

@@ -84,10 +84,16 @@ Para probar: con la simulación corriendo, el botón de la izquierda del WaveGen
 enciende/apaga el WAV.
 
 - **On, lejos:** el ciclo sigue normal. Todavía no hay patrón de barrido.
-- **On, en el pico:** el barrido confirma grave y agudo. LCD `AMBULANCIA` /
-  `RESPUESTA xxxxms`, carril 1 verde, carril 2 rojo. Ese tiempo cuenta desde
-  que A0 empezó a moverse, no desde el clic del botón.
-- **On, al alejarse:** a las 25 ventanas sin tono en la banda vuelve el ciclo normal.
+- **On, en el pico:** el barrido confirma grave y agudo y solicita prioridad A.
+  Si B tiene el paso, termina su amarillo y se mantienen ambos rojos durante
+  1 s antes de habilitar A. El LCD muestra `AMBULANCIA` y el tiempo desde la
+  confirmación hasta la habilitación efectiva de A.
+- **On, al alejarse:** tras 25 ventanas sin tono comienza la recuperación,
+  respetando el amarillo y el todo-rojo antes de devolver el paso a B.
+- Una solicitud ya confirmada no se cancela si la señal se interrumpe durante
+  un despeje; las detecciones repetidas tampoco reinician la secuencia.
+- Ante un estado interno inválido o un exceso temporal extremo, el controlador
+  queda en `FALLO SEGURO` con ambos carriles en rojo hasta reiniciar.
 - En el osciloscopio de A0: onda centrada en ~2,5 V, barriendo alrededor de 1 kHz, con amplitud que sube y baja.
 
 ## LCD I2C (dirección 0x27)

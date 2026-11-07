@@ -24,6 +24,16 @@ static void expect_eq_u32(const char* name, uint32_t got, uint32_t want) {
   }
 }
 
+static void expect_eq_u8(const char* name, uint8_t got, uint8_t want) {
+  if (got != want) {
+    std::printf("FAIL: %s (got %u want %u)\n", name,
+                (unsigned int)got, (unsigned int)want);
+    g_failed++;
+  } else {
+    std::printf("PASS: %s\n", name);
+  }
+}
+
 static void expect_fase(const char* name, const Ciclo& c, CicloFase want) {
   if (c.fase != want) {
     std::printf("FAIL: %s (fase %d want %d)\n", name, (int)c.fase, (int)want);
@@ -43,176 +53,226 @@ static void expect_luces(const char* name, const Ciclo& c, CicloLuz a, CicloLuz 
   } else {
     std::printf("PASS: %s\n", name);
   }
+  expect_true("nunca hay dos verdes", !(ga == CICLO_VERDE && gb == CICLO_VERDE));
 }
 
-static void avanzar(Ciclo* c, uint32_t dt, bool patron, bool sirena) {
-  ciclo_avanzar(c, dt, patron, sirena);
+static uint8_t avanzar(Ciclo* c, uint32_t dt, bool patron, bool sirena) {
+  return ciclo_avanzar(c, dt, patron, sirena);
+}
+
+static void avanzar_a_b_verde(Ciclo* c) {
+  avanzar(c, CICLO_VERDE_MS, false, false);
+  avanzar(c, CICLO_AMARILLO_MS, false, false);
+  avanzar(c, CICLO_TODO_ROJO_MS, false, false);
 }
 
 int main() {
-  // --- Ciclo normal completo ---
+  {
+    bool sin_verdes_conflictivos = true;
+    for (int fase = CICLO_A_VERDE; fase <= CICLO_FALLO_SEGURO; fase++) {
+      Ciclo c;
+      ciclo_init(&c);
+      c.fase = (CicloFase)fase;
+      const CicloLuz a = ciclo_luz_a(&c);
+      const CicloLuz b = ciclo_luz_b(&c);
+      if (a == CICLO_VERDE && b == CICLO_VERDE) sin_verdes_conflictivos = false;
+    }
+    expect_true("ninguna fase permite dos verdes", sin_verdes_conflictivos);
+  }
+
   {
     Ciclo c;
     ciclo_init(&c);
-    expect_fase("init A verde", c, CICLO_A_VERDE);
-    expect_luces("init luces", c, CICLO_VERDE, CICLO_ROJO);
-    expect_eq_u32("init 5s", c.restante_ms, CICLO_VERDE_MS);
-
+    expect_fase("inicia A verde", c, CICLO_A_VERDE);
+    expect_luces("inicial A verde/B rojo", c, CICLO_VERDE, CICLO_ROJO);
     avanzar(&c, CICLO_VERDE_MS, false, false);
-    expect_fase("tras 5s A amarillo", c, CICLO_A_AMARILLO);
-    expect_luces("A amarillo luces", c, CICLO_AMARILLO, CICLO_ROJO);
-
+    expect_fase("A verde -> A amarillo", c, CICLO_A_AMARILLO);
     avanzar(&c, CICLO_AMARILLO_MS, false, false);
-    expect_fase("tras A amarillo B verde", c, CICLO_B_VERDE);
-    expect_luces("B verde luces", c, CICLO_ROJO, CICLO_VERDE);
-
+    expect_fase("A amarillo -> todo rojo", c, CICLO_TODO_ROJO);
+    expect_luces("todo rojo hacia B", c, CICLO_ROJO, CICLO_ROJO);
+    expect_eq_u32("todo rojo dura 1s", c.restante_ms, CICLO_TODO_ROJO_MS);
+    avanzar(&c, CICLO_TODO_ROJO_MS - 1, false, false);
+    expect_fase("sigue todo rojo antes de 1s", c, CICLO_TODO_ROJO);
+    avanzar(&c, 1, false, false);
+    expect_fase("todo rojo -> B verde", c, CICLO_B_VERDE);
     avanzar(&c, CICLO_VERDE_MS, false, false);
-    expect_fase("tras B verde B amarillo", c, CICLO_B_AMARILLO);
-    expect_luces("B amarillo luces", c, CICLO_ROJO, CICLO_AMARILLO);
-
-    avanzar(&c, CICLO_AMARILLO_MS, false, false);
-    expect_fase("ciclo vuelve a A verde", c, CICLO_A_VERDE);
-    expect_eq_u32("nuevo verde 5s", c.restante_ms, CICLO_VERDE_MS);
+    expect_fase("B verde -> B amarillo", c, CICLO_B_AMARILLO);
+    avanzar(&c, CICLO_AMARILLO_MS + CICLO_TODO_ROJO_MS, false, false);
+    expect_fase("B amarillo y despeje -> A verde", c, CICLO_A_VERDE);
   }
 
-  // --- A verde: conserva resto ---
   {
     Ciclo c;
     ciclo_init(&c);
     avanzar(&c, 2000, false, false);
-    expect_eq_u32("A verde resto 3s", c.restante_ms, 3000);
-    avanzar(&c, 0, true, true);
-    expect_fase("A verde -> ambulancia", c, CICLO_AMBULANCIA);
-    expect_luces("ambulancia luces", c, CICLO_VERDE, CICLO_ROJO);
-    expect_true("LCD ambulancia en prioridad", ciclo_muestra_ambulancia(&c));
-
-    avanzar(&c, 8000, false, true);
-    expect_fase("sigue ambulancia con sirena", c, CICLO_AMBULANCIA);
-    expect_eq_u32("resto A no consume ambulancia", c.restante_guardado_ms, 3000);
-
-    avanzar(&c, 10, false, false);
-    expect_fase("fin -> retoma A verde", c, CICLO_A_VERDE);
-    expect_eq_u32("retoma con 3s", c.restante_ms, 3000);
-    expect_true("LCD normal al retomar", !ciclo_muestra_ambulancia(&c));
+    const uint8_t eventos = avanzar(&c, 0, true, true);
+    expect_fase("emergencia en A verde: prioridad inmediata", c, CICLO_PRIORIDAD_A);
+    expect_luces("prioridad A mantiene A verde", c, CICLO_VERDE, CICLO_ROJO);
+    expect_eq_u32("conserva resto de A", c.restante_guardado_ms, 3000);
+    expect_eq_u8("emite solicitud y prioridad", eventos,
+                 CICLO_EVENTO_SOLICITUD | CICLO_EVENTO_PRIORIDAD_ACTIVA);
+    expect_eq_u8("deteccion repetida no duplica solicitud",
+                 avanzar(&c, 100, true, true), CICLO_EVENTO_NINGUNO);
+    expect_fase("repetida mantiene prioridad", c, CICLO_PRIORIDAD_A);
+    expect_eq_u8("sirena activa mantiene prioridad",
+                 avanzar(&c, 10000, false, true), CICLO_EVENTO_NINGUNO);
+    const uint8_t fin = avanzar(&c, 0, false, false);
+    expect_fase("fin de emergencia retoma A verde", c, CICLO_A_VERDE);
+    expect_eq_u32("retoma resto A", c.restante_ms, 3000);
+    expect_eq_u8("emite fin y recuperacion", fin,
+                 CICLO_EVENTO_EMERGENCIA_FINALIZADA |
+                 CICLO_EVENTO_RECUPERACION_COMPLETA);
   }
 
-  // --- A amarillo: despeje A completo y luego B verde ---
   {
     Ciclo c;
     ciclo_init(&c);
-    avanzar(&c, CICLO_VERDE_MS, false, false);
-    avanzar(&c, 500, false, false);
-    expect_fase("en A amarillo", c, CICLO_A_AMARILLO);
-    avanzar(&c, 0, true, true);
-    expect_fase("A amarillo -> ambulancia", c, CICLO_AMBULANCIA);
-    expect_luces("abre A verde", c, CICLO_VERDE, CICLO_ROJO);
-
-    avanzar(&c, 100, false, false);
-    expect_fase("fin A amarillo -> despeje A", c, CICLO_DESPEJE_A);
-    expect_luces("despeje A luces", c, CICLO_AMARILLO, CICLO_ROJO);
-    expect_true("LCD normal en despeje salida", !ciclo_muestra_ambulancia(&c));
-    expect_eq_u32("despeje A 2s", c.restante_ms, CICLO_AMARILLO_MS);
-
-    avanzar(&c, CICLO_AMARILLO_MS, false, false);
-    expect_fase("despues despeje B verde", c, CICLO_B_VERDE);
-    expect_eq_u32("B verde completo", c.restante_ms, CICLO_VERDE_MS);
+    avanzar(&c, CICLO_VERDE_MS + 500, false, false);
+    const uint8_t solicitud = avanzar(&c, 0, true, true);
+    expect_fase("emergencia en A amarillo conserva amarillo", c, CICLO_A_AMARILLO);
+    expect_true("señaliza solicitud pendiente", (solicitud & CICLO_EVENTO_SOLICITUD) != 0);
+    avanzar(&c, c.restante_ms + CICLO_TODO_ROJO_MS, false, true);
+    expect_fase("A amarillo y todo rojo -> prioridad", c, CICLO_PRIORIDAD_A);
+    expect_luces("prioridad tras despejes", c, CICLO_VERDE, CICLO_ROJO);
+    avanzar(&c, 0, false, false);
+    expect_fase("salida de prioridad en recuperacion", c, CICLO_RECUPERACION_A_AMARILLO);
+    expect_luces("recuperacion despeja A", c, CICLO_AMARILLO, CICLO_ROJO);
+    avanzar(&c, CICLO_AMARILLO_MS + CICLO_TODO_ROJO_MS, false, false);
+    expect_fase("recuperacion vuelve a B", c, CICLO_B_VERDE);
   }
 
-  // --- B verde: despeje entrada, ambulancia, despeje salida, retoma resto ---
   {
     Ciclo c;
     ciclo_init(&c);
-    avanzar(&c, CICLO_VERDE_MS, false, false);
-    avanzar(&c, CICLO_AMARILLO_MS, false, false);
+    avanzar_a_b_verde(&c);
     avanzar(&c, 1500, false, false);
-    expect_fase("en B verde", c, CICLO_B_VERDE);
-    expect_eq_u32("B verde resto 3.5s", c.restante_ms, 3500);
-
     avanzar(&c, 0, true, true);
-    expect_fase("B verde -> despeje B", c, CICLO_DESPEJE_B);
-    expect_luces("despeje B luces", c, CICLO_ROJO, CICLO_AMARILLO);
-    expect_true("LCD ambulancia en despeje entrada", ciclo_muestra_ambulancia(&c));
-    expect_eq_u32("despeje B 2s", c.restante_ms, CICLO_AMARILLO_MS);
-    expect_eq_u32("congela resto B", c.restante_guardado_ms, 3500);
-
-    avanzar(&c, CICLO_AMARILLO_MS, false, true);
-    expect_fase("despues despeje B -> ambulancia", c, CICLO_AMBULANCIA);
-    expect_luces("ambulancia tras despeje", c, CICLO_VERDE, CICLO_ROJO);
-
-    avanzar(&c, 50, false, false);
-    expect_fase("fin B verde -> despeje A", c, CICLO_DESPEJE_A);
-    expect_luces("despeje salida A", c, CICLO_AMARILLO, CICLO_ROJO);
-
-    avanzar(&c, CICLO_AMARILLO_MS, false, false);
-    expect_fase("retoma B verde", c, CICLO_B_VERDE);
-    expect_eq_u32("retoma resto 3.5s", c.restante_ms, 3500);
-    expect_luces("B verde luces retoma", c, CICLO_ROJO, CICLO_VERDE);
+    expect_fase("emergencia en B verde inicia B amarillo", c, CICLO_B_AMARILLO);
+    expect_eq_u32("guarda restante de B", c.restante_guardado_ms, 3500);
+    expect_luces("despeje de B", c, CICLO_ROJO, CICLO_AMARILLO);
+    expect_eq_u8("deteccion repetida no reinicia despeje",
+                 avanzar(&c, 500, true, true), CICLO_EVENTO_NINGUNO);
+    expect_eq_u32("el amarillo sigue corriendo", c.restante_ms,
+                  CICLO_AMARILLO_MS - 500);
+    avanzar(&c, c.restante_ms + CICLO_TODO_ROJO_MS, false, false);
+    expect_fase("amarillo B y todo rojo -> prioridad", c, CICLO_PRIORIDAD_A);
+    expect_luces("prioridad solo después del despeje", c, CICLO_VERDE, CICLO_ROJO);
+    avanzar(&c, 0, false, false);
+    expect_fase("fin de prioridad despeja A", c, CICLO_RECUPERACION_A_AMARILLO);
+    avanzar(&c, CICLO_AMARILLO_MS + CICLO_TODO_ROJO_MS, false, false);
+    expect_fase("recupera B", c, CICLO_B_VERDE);
+    expect_eq_u32("recupera resto congelado de B", c.restante_ms, 3500);
   }
 
-  // --- Sirena corta durante despeje B ---
   {
     Ciclo c;
     ciclo_init(&c);
-    avanzar(&c, CICLO_VERDE_MS, false, false);
-    avanzar(&c, CICLO_AMARILLO_MS, false, false);
-    avanzar(&c, 1000, false, false);
+    avanzar_a_b_verde(&c);
+    avanzar(&c, CICLO_VERDE_MS + 800, false, false);
     avanzar(&c, 0, true, true);
-    expect_fase("despeje B activo", c, CICLO_DESPEJE_B);
-    avanzar(&c, 500, false, false);
-    expect_fase("sirena corta -> B verde", c, CICLO_B_VERDE);
-    expect_eq_u32("restaura resto congelado", c.restante_ms, 4000);
-    expect_luces("B verde otra vez", c, CICLO_ROJO, CICLO_VERDE);
-    expect_true("LCD normal al cancelar", !ciclo_muestra_ambulancia(&c));
+    expect_fase("emergencia en B amarillo conserva fase", c, CICLO_B_AMARILLO);
+    expect_eq_u32("conserva tiempo de amarillo B", c.restante_ms, 1200);
+    avanzar(&c, CICLO_AMARILLO_MS - 800 + CICLO_TODO_ROJO_MS, false, true);
+    expect_fase("B amarillo y todo rojo -> prioridad", c, CICLO_PRIORIDAD_A);
+    avanzar(&c, 0, false, false);
+    expect_fase("fin desde B amarillo deja A verde normal", c, CICLO_A_VERDE);
+    expect_eq_u32("nuevo verde A completo", c.restante_ms, CICLO_VERDE_MS);
   }
 
-  // --- B amarillo: termina amarillo, ambulancia, luego A verde 5s ---
   {
     Ciclo c;
     ciclo_init(&c);
-    avanzar(&c, CICLO_VERDE_MS, false, false);
-    avanzar(&c, CICLO_AMARILLO_MS, false, false);
-    avanzar(&c, CICLO_VERDE_MS, false, false);
-    avanzar(&c, 800, false, false);
-    expect_fase("en B amarillo", c, CICLO_B_AMARILLO);
-    expect_eq_u32("B amarillo resto 1.2s", c.restante_ms, 1200);
-
-    avanzar(&c, 0, true, true);
-    expect_fase("sigue B amarillo pendiente", c, CICLO_B_AMARILLO);
-    expect_true("LCD ambulancia pendiente", ciclo_muestra_ambulancia(&c));
-    expect_luces("sigue B amarillo luces", c, CICLO_ROJO, CICLO_AMARILLO);
-
-    avanzar(&c, 1200, false, true);
-    expect_fase("amarillo listo -> ambulancia", c, CICLO_AMBULANCIA);
-    expect_luces("ambulancia desde B amarillo", c, CICLO_VERDE, CICLO_ROJO);
-
-    avanzar(&c, 10, false, false);
-    expect_fase("fin -> A verde completo", c, CICLO_A_VERDE);
-    expect_eq_u32("A verde 5s", c.restante_ms, CICLO_VERDE_MS);
+    avanzar(&c, CICLO_VERDE_MS + CICLO_AMARILLO_MS, false, false);
+    expect_fase("espera en todo rojo normal", c, CICLO_TODO_ROJO);
+    const uint8_t solicitud = avanzar(&c, 0, true, true);
+    expect_true("emergencia durante todo rojo queda pendiente",
+                (solicitud & CICLO_EVENTO_SOLICITUD) != 0);
+    expect_luces("todo rojo no se interrumpe", c, CICLO_ROJO, CICLO_ROJO);
+    expect_eq_u32("no reinicia el intervalo de todo rojo", c.restante_ms,
+                  CICLO_TODO_ROJO_MS);
+    avanzar(&c, CICLO_TODO_ROJO_MS, false, true);
+    expect_fase("todo rojo pendiente -> prioridad", c, CICLO_PRIORIDAD_A);
+    expect_luces("prioridad solo tras todo rojo", c, CICLO_VERDE, CICLO_ROJO);
   }
 
-  // --- Reentrada durante despeje A (venia de B verde) ---
   {
     Ciclo c;
     ciclo_init(&c);
-    avanzar(&c, CICLO_VERDE_MS, false, false);
-    avanzar(&c, CICLO_AMARILLO_MS, false, false);
+    avanzar_a_b_verde(&c);
     avanzar(&c, 2000, false, false);
     avanzar(&c, 0, true, true);
-    avanzar(&c, CICLO_AMARILLO_MS, false, true);
-    expect_fase("en ambulancia", c, CICLO_AMBULANCIA);
-    avanzar(&c, 10, false, false);
-    expect_fase("en despeje A", c, CICLO_DESPEJE_A);
-    expect_eq_u32("B pendiente 3s", c.restante_guardado_ms, 3000);
+    avanzar(&c, CICLO_AMARILLO_MS + CICLO_TODO_ROJO_MS, false, true);
+    avanzar(&c, 0, false, false);
+    expect_fase("primera emergencia inicia recuperacion", c,
+                CICLO_RECUPERACION_A_AMARILLO);
+    avanzar(&c, 500, false, false);
+    avanzar(&c, 0, true, true);
+    expect_fase("segunda solicitud mantiene amarillo de recuperacion", c,
+                CICLO_RECUPERACION_A_AMARILLO);
+    expect_eq_u32("segunda solicitud no reinicia amarillo", c.restante_ms, 1500);
+    avanzar(&c, c.restante_ms + CICLO_TODO_ROJO_MS, false, true);
+    expect_fase("segunda solicitud reentra tras todo rojo", c, CICLO_PRIORIDAD_A);
+    avanzar(&c, 0, false, false);
+    avanzar(&c, CICLO_AMARILLO_MS + CICLO_TODO_ROJO_MS, false, false);
+    expect_fase("recupera B con la fase original", c, CICLO_B_VERDE);
+    expect_eq_u32("conserva resto B tras reentrada", c.restante_ms, 3000);
+  }
 
-    avanzar(&c, 400, true, true);
-    expect_fase("sirena otra vez -> ambulancia", c, CICLO_AMBULANCIA);
-    expect_eq_u32("B sigue pendiente 3s", c.restante_guardado_ms, 3000);
+  {
+    Ciclo c;
+    ciclo_init(&c);
+    avanzar(&c, CICLO_VERDE_MS + CICLO_AMARILLO_MS + CICLO_TODO_ROJO_MS
+                 + CICLO_VERDE_MS + CICLO_AMARILLO_MS, false, false);
+    expect_fase("el sobretiempo procesa varias fases", c, CICLO_TODO_ROJO);
+    expect_eq_u32("el intervalo siguiente conserva su duracion",
+                  c.restante_ms, CICLO_TODO_ROJO_MS);
+    avanzar(&c, CICLO_TODO_ROJO_MS, false, false);
+    expect_fase("el sobretiempo no omite todo rojo", c, CICLO_A_VERDE);
+  }
 
-    avanzar(&c, 10, false, false);
-    expect_fase("otra vez despeje A", c, CICLO_DESPEJE_A);
-    avanzar(&c, CICLO_AMARILLO_MS, false, false);
-    expect_fase("retoma B con mismo resto", c, CICLO_B_VERDE);
-    expect_eq_u32("resto B intacto", c.restante_ms, 3000);
+  {
+    Ciclo c;
+    ciclo_init(&c);
+    const uint32_t antes = UINT32_MAX - 3U;
+    const uint32_t ahora = 2U;
+    const uint32_t dt = (uint32_t)(ahora - antes);
+    expect_eq_u32("delta de millis cruza el desbordamiento", dt, 6);
+    avanzar(&c, dt, false, false);
+    expect_eq_u32("el tiempo restante cruza el desbordamiento", c.restante_ms,
+                  CICLO_VERDE_MS - 6);
+  }
+
+  {
+    Ciclo c;
+    ciclo_init(&c);
+    c.fase = (CicloFase)99;
+    expect_luces("fase invalida produce rojo inmediato", c, CICLO_ROJO, CICLO_ROJO);
+    expect_eq_u8("estado invalido reportado",
+                 avanzar(&c, 0, false, false), CICLO_EVENTO_ESTADO_INVALIDO);
+    expect_fase("estado invalido queda enclavado seguro", c, CICLO_FALLO_SEGURO);
+    expect_luces("fallo seguro mantiene ambos rojos", c, CICLO_ROJO, CICLO_ROJO);
+    avanzar(&c, UINT32_MAX, true, true);
+    expect_fase("fallo seguro no se auto-habilita", c, CICLO_FALLO_SEGURO);
+  }
+
+  {
+    Ciclo c;
+    ciclo_init(&c);
+    expect_eq_u8("sobretiempo extremo va a fallo seguro",
+                 avanzar(&c, UINT32_MAX, false, false),
+                 CICLO_EVENTO_ESTADO_INVALIDO);
+    expect_luces("sobretiempo extremo deja ambos rojos", c, CICLO_ROJO, CICLO_ROJO);
+  }
+
+  {
+    Ciclo c;
+    ciclo_init(&c);
+    c.fase = CICLO_TODO_ROJO;
+    c.destino_todo_rojo = CICLO_DESTINO_NINGUNO;
+    expect_eq_u8("destino invalido enclava fallo seguro",
+                 avanzar(&c, 0, false, false), CICLO_EVENTO_ESTADO_INVALIDO);
+    expect_fase("destino invalido permanece seguro", c, CICLO_FALLO_SEGURO);
+    expect_luces("destino invalido conserva ambos rojos", c, CICLO_ROJO, CICLO_ROJO);
   }
 
   if (g_failed) {

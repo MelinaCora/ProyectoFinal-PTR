@@ -4,6 +4,10 @@ Fecha: 2 de octubre de 2026
 Proyecto: cruce de 2 semáforos con prioridad de ambulancia (`d:\project`)  
 Pregunta: reemplazar el potenciómetro por detección de audio de sirena, analizando las frecuencias, y ver si **Wokwi lo hace gratis**. Si no, si **SimulIDE** puede.
 
+Nota: este documento registra la investigación inicial y contiene referencias a
+una versión anterior del firmware. El detector Goertzel y el ciclo descritos
+en el `README.md` corresponden a una implementación posterior.
+
 ## Conclusión
 
 **Wokwi, de forma gratuita y documentada, no.** No hay micrófono en el catálogo oficial, la simulación analógica es básica (casi continua/DC) y el prototipo de micrófono del navegador quedó sin documentar, con aviso explícito de que las frecuencias se distorsionan.
