@@ -173,15 +173,19 @@ En el osciloscopio de `A0` la onda tiene que verse centrada en unos 2,5 V,
 barriendo alrededor de 1 kHz, con amplitud que crece y después decrece.
 Recompilá y volvé a cargar el `.hex` después de este cambio.
 
-## Diagnóstico UART
+## Telemetría UART
 
-El firmware emite una línea de diagnóstico por UART0 a 9600 baudios cada
-1000 ms de tiempo simulado. Para abrir el monitor interno de SimulIDE o probar
-un puerto COM externo, seguí
-[`docs/FASE_3A_COMUNICACION_SERIAL.md`](docs/FASE_3A_COMUNICACION_SERIAL.md).
-La salida es temporal y no constituye todavía el protocolo del dashboard.
-Para la alternativa sin controladores COM de Windows, consultá
-[`docs/FASE_3A_ALTERNATIVA_COMUNICACION.md`](docs/FASE_3A_ALTERNATIVA_COMUNICACION.md).
+El firmware transmite eventos, cambios de estado y heartbeats por UART0 a
+9600 baudios mediante el protocolo SIV v1. La conexión es solo de supervisión:
+Arduino sigue controlando los semáforos aunque Python esté desconectado.
+Consultá la especificación en
+[`docs/FASE_3B_EVENTOS_METRICAS.md`](docs/FASE_3B_EVENTOS_METRICAS.md) y los
+pasos para conectar SimulIDE Linux, `socat` y Python en
+[`docs/GUIA_EJECUCION_SEMAFOROS_UART_LINUX.md`](docs/GUIA_EJECUCION_SEMAFOROS_UART_LINUX.md).
+
+La Fase 3A documenta la prueba histórica `SIV_TEST`; no es el formato del
+firmware actual. La investigación de la alternativa WSL2 sin controladores COM
+está en [`docs/FASE_3A_ALTERNATIVA_COMUNICACION.md`](docs/FASE_3A_ALTERNATIVA_COMUNICACION.md).
 
 ## Prueba opcional del detector y del ciclo
 
@@ -196,12 +200,15 @@ patrón, y que `sirena.wav` no dispare de lejos, sí en el pico y no otra vez al
 alejarse.
 
 La lógica de fases e interrupción (`src/ciclo.h`) se prueba siempre con el
-runner JavaScript. La prueba C++ adicional requiere `g++`:
+runner JavaScript. Las pruebas nativas adicionales de ciclo y telemetría
+requieren `g++`:
 
 ```powershell
 node test\test_ciclo.mjs
 pio run -e test_ciclo
 .pio\build\test_ciclo\program.exe
+pio run -e test_telemetria
+.pio\build\test_telemetria\program.exe
 ```
 
 ## Problemas comunes

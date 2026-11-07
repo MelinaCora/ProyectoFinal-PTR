@@ -1,10 +1,25 @@
 import argparse
 import sys
 
+if __package__:
+    from .serial_protocol import (
+        ProtocoloError,
+        RastreadorSecuencia,
+        describir,
+        parsear_mensaje,
+    )
+else:
+    from serial_protocol import (
+        ProtocoloError,
+        RastreadorSecuencia,
+        describir,
+        parsear_mensaje,
+    )
+
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Lee lineas de diagnóstico UART del controlador de semáforos."
+        description="Lee eventos de supervisión UART del controlador de semáforos."
     )
     parser.add_argument(
         "--port",
@@ -24,6 +39,7 @@ def main():
         return 1
 
     port = None
+    rastreador = RastreadorSecuencia()
     try:
         port = serial.Serial(
             port=args.port,
@@ -37,7 +53,19 @@ def main():
         while True:
             line = port.readline()
             if line:
-                print(line.decode("ascii", errors="replace").rstrip("\r\n"), flush=True)
+                try:
+                    texto = line.decode("ascii")
+                    mensaje = parsear_mensaje(texto)
+                except UnicodeDecodeError as exc:
+                    print(f"Mensaje inválido: no es ASCII ({exc})", file=sys.stderr)
+                    continue
+                except ProtocoloError as exc:
+                    print(f"Mensaje inválido: {exc}: {line!r}", file=sys.stderr)
+                    continue
+
+                for aviso in rastreador.observar(mensaje):
+                    print(f"AVISO: {aviso}", file=sys.stderr)
+                print(describir(mensaje), flush=True)
     except KeyboardInterrupt:
         print("\nLectura finalizada.")
     except (serial.SerialException, OSError) as exc:

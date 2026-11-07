@@ -127,6 +127,25 @@ int main() {
   {
     Ciclo c;
     ciclo_init(&c);
+    avanzar_a_b_verde(&c);
+    CicloFase fase_solicitud = CICLO_FALLO_SEGURO;
+    CicloLuz luz_a_solicitud = CICLO_AMARILLO;
+    CicloLuz luz_b_solicitud = CICLO_AMARILLO;
+    const uint8_t eventos = ciclo_avanzar_con_instantanea(
+        &c, CICLO_VERDE_MS, true, true, &fase_solicitud,
+        &luz_a_solicitud, &luz_b_solicitud);
+    expect_true("captura el estado tras avanzar el tiempo y antes de la solicitud",
+                (eventos & CICLO_EVENTO_SOLICITUD) != 0
+                    && fase_solicitud == CICLO_B_AMARILLO
+                    && luz_a_solicitud == CICLO_ROJO
+                    && luz_b_solicitud == CICLO_AMARILLO);
+    expect_fase("la instantanea no cambia el resultado de la FSM",
+                c, CICLO_B_AMARILLO);
+  }
+
+  {
+    Ciclo c;
+    ciclo_init(&c);
     avanzar(&c, CICLO_VERDE_MS + 500, false, false);
     const uint8_t solicitud = avanzar(&c, 0, true, true);
     expect_fase("emergencia en A amarillo conserva amarillo", c, CICLO_A_AMARILLO);

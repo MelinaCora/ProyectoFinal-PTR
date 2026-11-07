@@ -1,7 +1,9 @@
 # Guía de ejecución — Sistema de Semáforos
 
 Guía para conectar el Arduino UNO simulado en SimulIDE para Linux con el
-receptor Python mediante dos pseudo-terminales enlazados por `socat`.
+receptor Python mediante dos pseudo-terminales enlazados por `socat`. El
+firmware actual usa el protocolo de eventos SIV v1 descrito en
+[`FASE_3B_EVENTOS_METRICAS.md`](FASE_3B_EVENTOS_METRICAS.md).
 
 ## Requisitos
 
@@ -83,21 +85,24 @@ python tools/serial_receiver.py --port /tmp/siv-python --baud 9600
 
 ## 4. Verificar la comunicación
 
-La terminal de Python debe mostrar líneas similares a:
+La terminal de Python debe mostrar descripciones legibles para mensajes como:
 
 ```text
-SIV_TEST,UPTIME_MS=1000,STATUS=OK
-SIV_TEST,UPTIME_MS=2000,STATUS=OK
+[120 ms] Arranque del controlador
+[121 ms] Estado: fase=A_VERDE, modo=NORMAL, A=G, B=R, restante=5000 ms
+[1121 ms] Heartbeat: fase=A_VERDE, modo=NORMAL, A=G, B=R, restante=4000 ms
 ```
 
 Comprueba que:
 
-- Cada línea empiece con `SIV_TEST,UPTIME_MS=`.
-- `UPTIME_MS` aumente entre mensajes.
-- Cada línea termine con `STATUS=OK`.
-- El texto sea legible y llegue aproximadamente cada 1000 ms de tiempo
-  simulado. La cadencia observada en el reloj de pared puede variar con la
-  velocidad de la simulación.
+- Aparezca el mensaje de arranque, seguido por el estado y heartbeats.
+- El tiempo Arduino avance entre mensajes y los heartbeats se generen cada
+  1000 ms de tiempo simulado. La cadencia observada en el reloj de pared puede
+  variar con la velocidad de SimulIDE.
+- Al activar la sirena, aparezcan los eventos de detección, prioridad,
+  finalización y recuperación de acuerdo con la transición real de los
+  semáforos.
+- No se esperan eventos de emergencia si solo se deja correr el ciclo normal.
 
 ## 5. Detener el sistema
 
@@ -121,5 +126,9 @@ Comprueba que:
   por SimulIDE para Windows.
 - Conserva el circuito original como respaldo y realiza cambios de prueba en
   una copia.
-- Esta prueba valida la recepción de diagnóstico UART. Todavía no implementa
-  el protocolo definitivo de eventos ni el dashboard.
+- La comunicación es solo de supervisión: cerrar Python no debe cambiar la
+  FSM ni detener los semáforos.
+- El código fuente UART transmitido es `SIV,1,...`; `SIV_TEST,...` pertenece a
+  la prueba anterior de Fase 3A y ya no es el formato del firmware actual.
+- Esta guía no afirma que la recepción nueva se haya probado gráficamente; la
+  validación manual sigue pendiente hasta observar los mensajes en el receptor.

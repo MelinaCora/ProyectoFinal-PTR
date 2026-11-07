@@ -1,5 +1,10 @@
 # Fase 3A — Validación de comunicación serial
 
+> Documento histórico: la prueba `SIV_TEST` fue reemplazada por el protocolo
+> de supervisión SIV v1 de la Fase 3B. Para ejecutar el firmware actual, usar
+> [`FASE_3B_EVENTOS_METRICAS.md`](FASE_3B_EVENTOS_METRICAS.md) y
+> [`GUIA_EJECUCION_SEMAFOROS_UART_LINUX.md`](GUIA_EJECUCION_SEMAFOROS_UART_LINUX.md).
+
 ## 1. Objetivo
 
 Validar la transmisión de diagnóstico del Arduino simulado por UART antes de

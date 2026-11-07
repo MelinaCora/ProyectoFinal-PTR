@@ -1,5 +1,10 @@
 # Fase 3A — Alternativa de comunicación sin COM virtual de Windows
 
+> Investigación histórica de la prueba `SIV_TEST`. El firmware actual usa el
+> protocolo SIV v1 documentado en
+> [`FASE_3B_EVENTOS_METRICAS.md`](FASE_3B_EVENTOS_METRICAS.md); la guía vigente
+> de ejecución es [`GUIA_EJECUCION_SEMAFOROS_UART_LINUX.md`](GUIA_EJECUCION_SEMAFOROS_UART_LINUX.md).
+
 ## 1. Objetivo y conclusión ejecutiva
 
 Evaluar una ruta reproducible para enviar el UART del Arduino UNO simulado a

@@ -282,8 +282,10 @@ inline uint8_t ciclo_fallar_seguro(Ciclo* c) {
   return CICLO_EVENTO_ESTADO_INVALIDO;
 }
 
-inline uint8_t ciclo_avanzar(Ciclo* c, uint32_t dt_ms,
-                             bool patron_confirmado, bool sirena_activa) {
+inline uint8_t ciclo_avanzar_con_instantanea(
+    Ciclo* c, uint32_t dt_ms, bool patron_confirmado, bool sirena_activa,
+    CicloFase* fase_solicitud, CicloLuz* luz_a_solicitud,
+    CicloLuz* luz_b_solicitud) {
   if (c == 0) return CICLO_EVENTO_ESTADO_INVALIDO;
   if (c->fase == CICLO_FALLO_SEGURO) return CICLO_EVENTO_NINGUNO;
   if (!ciclo_estado_valido(c)) return ciclo_fallar_seguro(c);
@@ -345,8 +347,25 @@ inline uint8_t ciclo_avanzar(Ciclo* c, uint32_t dt_ms,
   }
 
   if (!ciclo_estado_valido(c)) return eventos | ciclo_fallar_seguro(c);
-  if (patron_confirmado) eventos |= ciclo_solicitar_prioridad(c);
+  if (patron_confirmado) {
+    const CicloFase fase = c->fase;
+    const CicloLuz luz_a = ciclo_luz_a(c);
+    const CicloLuz luz_b = ciclo_luz_b(c);
+    const uint8_t solicitud = ciclo_solicitar_prioridad(c);
+    if (solicitud & CICLO_EVENTO_SOLICITUD) {
+      if (fase_solicitud != 0) *fase_solicitud = fase;
+      if (luz_a_solicitud != 0) *luz_a_solicitud = luz_a;
+      if (luz_b_solicitud != 0) *luz_b_solicitud = luz_b;
+    }
+    eventos |= solicitud;
+  }
   return eventos;
+}
+
+inline uint8_t ciclo_avanzar(Ciclo* c, uint32_t dt_ms,
+                             bool patron_confirmado, bool sirena_activa) {
+  return ciclo_avanzar_con_instantanea(
+      c, dt_ms, patron_confirmado, sirena_activa, 0, 0, 0);
 }
 
 #endif
