@@ -1,17 +1,21 @@
 import asyncio
 import sqlite3
 import tempfile
+import threading
 import time
 import unittest
 from contextlib import closing
 from pathlib import Path
 
 from httpx import ASGITransport, AsyncClient
+from starlette.testclient import TestClient
+from starlette.websockets import WebSocketDisconnect
 
 from backend.app.config import Settings
 from backend.app.main import create_app
-from backend.app.serial_service import RuntimeStatus, SerialWorker
+from backend.app.serial_service import RuntimeStatus, SerialWorker, websocket_message
 from backend.app.storage import EventStore
+from backend.app.websocket_hub import WebSocketHub
 from tools.serial_protocol import parsear_mensaje
 
 
@@ -254,6 +258,51 @@ class SerialWorkerTests(unittest.TestCase):
         self.assertEqual(store.get_incident(1)["incident_id"], 7)
         self.assertEqual(store.get_incident(1)["status"], "DETECTADA")
 
+    def test_worker_publishes_only_persisted_messages(self):
+        temp_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(temp_dir.cleanup)
+        store = EventStore(Path(temp_dir.name) / "serial.sqlite3")
+        status = RuntimeStatus()
+        lines = [
+            b"SIV,1,1,121,STATE,0,G,R,A_VERDE,NORMAL,5000\n",
+            b"SIV,1,1,121,STATE,0,G,R,A_VERDE,NORMAL,5000\n",
+        ]
+        published = []
+
+        class FakeSerial:
+            def readline(self):
+                if lines:
+                    return lines.pop(0)
+                time.sleep(0.005)
+                return b""
+
+            def close(self):
+                pass
+
+        worker = SerialWorker(
+            store,
+            status,
+            "/tmp/test-siv",
+            9600,
+            retry_seconds=0.1,
+            serial_factory=lambda _port, _baudrate: FakeSerial(),
+            on_message=lambda message, result: published.append(
+                websocket_message(message, result)
+            ),
+        )
+        worker.start()
+        self.addCleanup(worker.stop)
+        deadline = time.time() + 1
+        while lines:
+            if time.time() >= deadline:
+                self.fail("el receptor no consumió las tramas seriales")
+            time.sleep(0.01)
+        time.sleep(0.05)
+
+        self.assertEqual(len(published), 1)
+        self.assertEqual(published[0]["type"], "state")
+        self.assertEqual(store.list_incidents(10, 0)["total"], 0)
+
     def test_serial_disconnect_is_reported_and_does_not_stop_backend(self):
         temp_dir = tempfile.TemporaryDirectory()
         self.addCleanup(temp_dir.cleanup)
@@ -283,6 +332,197 @@ class SerialWorkerTests(unittest.TestCase):
         self.assertEqual(health["backend"], "ok")
         self.assertFalse(health["serial"]["connected"])
         self.assertIn("puerto no disponible", health["serial"]["last_error"])
+
+    def test_worker_reports_serial_disconnect_and_reconnection(self):
+        temp_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(temp_dir.cleanup)
+        store = EventStore(Path(temp_dir.name) / "serial.sqlite3")
+        status = RuntimeStatus()
+        disconnect = threading.Event()
+        transitions = []
+        factory_calls = []
+
+        class FakeSerial:
+            def __init__(self, should_disconnect):
+                self.should_disconnect = should_disconnect
+
+            def readline(self):
+                if self.should_disconnect and disconnect.wait(0.01):
+                    raise OSError("conexión perdida")
+                time.sleep(0.01)
+                return b""
+
+            def close(self):
+                pass
+
+        def serial_factory(_port, _baudrate):
+            factory_calls.append(True)
+            return FakeSerial(len(factory_calls) == 1)
+
+        worker = SerialWorker(
+            store,
+            status,
+            "/tmp/test-siv",
+            9600,
+            retry_seconds=0.01,
+            serial_factory=serial_factory,
+            on_connection=lambda snapshot: transitions.append(
+                snapshot["serial_connected"]
+            ),
+        )
+        worker.start()
+        self.addCleanup(worker.stop)
+        deadline = time.time() + 1
+        while not transitions:
+            if time.time() >= deadline:
+                self.fail("no se informó la conexión serial inicial")
+            time.sleep(0.01)
+        disconnect.set()
+        while transitions != [True, False, True]:
+            if time.time() >= deadline:
+                self.fail("no se informaron pérdida y recuperación serial")
+            time.sleep(0.01)
+
+
+class WebSocketTests(unittest.TestCase):
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        settings = Settings(
+            database_path=Path(self.temp_dir.name) / "ws.sqlite3",
+            serial_enabled=False,
+        )
+        self.app = create_app(settings)
+
+    def tearDown(self):
+        self.temp_dir.cleanup()
+
+    def test_snapshot_state_incident_two_clients_and_disconnect(self):
+        store = self.app.state.store
+        runtime = self.app.state.runtime
+        boot = parse("SIV,1,0,120,BOOT,0")
+        state = parse("SIV,1,1,121,STATE,0,G,R,A_VERDE,NORMAL,5000")
+        boot_result = store.ingest(boot)
+        runtime.observe(boot, boot_result)
+        state_result = store.ingest(state)
+        runtime.observe(state, state_result)
+
+        with TestClient(self.app) as client:
+            with client.websocket_connect("/ws/monitor") as first:
+                initial = first.receive_json()
+                self.assertEqual(initial["type"], "snapshot")
+                self.assertEqual(initial["data"]["semaforo_a"], "G")
+
+                with client.websocket_connect("/ws/monitor") as second:
+                    second_initial = second.receive_json()
+                    self.assertEqual(second_initial["type"], "snapshot")
+                    self.app.state.websocket_hub.publish(
+                        {
+                            "type": "state",
+                            "data": {
+                                "semaforo_a": "R",
+                                "semaforo_b": "G",
+                                "fase": "B_VERDE",
+                                "modo": "NORMAL",
+                                "uptime_ms": 6121,
+                                "received_at": "2026-11-07T10:00:01.000+00:00",
+                            },
+                        }
+                    )
+                    self.assertEqual(first.receive_json()["type"], "state")
+                    self.assertEqual(second.receive_json()["type"], "state")
+
+                    incident_message = parse(
+                        "SIV,1,2,8300,EMERGENCIA_DETECTADA,7,A,R,G,B_VERDE,143"
+                    )
+                    incident_result = store.ingest(incident_message)
+                    self.app.state.websocket_hub.publish(
+                        websocket_message(incident_message, incident_result)
+                    )
+                    first_incident = first.receive_json()
+                    second_incident = second.receive_json()
+                    self.assertEqual(first_incident, second_incident)
+                    self.assertEqual(first_incident["type"], "incident")
+                    self.assertEqual(
+                        first_incident["data"]["event"], "EMERGENCIA_DETECTADA"
+                    )
+                    self.assertEqual(first_incident["data"]["incident_id"], 7)
+
+                with client.websocket_connect("/ws/monitor") as third:
+                    third.receive_json()
+                    third_message = parse(
+                        "SIV,1,3,9000,EMERGENCIA_DETECTADA,8,A,R,G,B_VERDE,120"
+                    )
+                    third_result = store.ingest(third_message)
+                    self.app.state.websocket_hub.publish(
+                        websocket_message(third_message, third_result)
+                    )
+                    self.assertEqual(first.receive_json()["data"]["incident_id"], 8)
+                    self.assertEqual(third.receive_json()["data"]["incident_id"], 8)
+
+        self.assertEqual(store.list_incidents(10, 0)["total"], 2)
+
+    def test_connection_loss_recovery_and_no_clients(self):
+        hub = self.app.state.websocket_hub
+        hub.publish({"type": "connection", "data": {"serial_connected": False}})
+        with TestClient(self.app) as client:
+            with client.websocket_connect("/ws/monitor") as websocket:
+                websocket.receive_json()
+                hub.publish({"type": "connection", "data": {"serial_connected": False}})
+                self.assertFalse(websocket.receive_json()["data"]["serial_connected"])
+                hub.publish({"type": "connection", "data": {"serial_connected": True}})
+                self.assertTrue(websocket.receive_json()["data"]["serial_connected"])
+
+    def test_client_commands_are_rejected_without_affecting_other_observers(self):
+        hub = self.app.state.websocket_hub
+        with TestClient(self.app) as client:
+            with client.websocket_connect("/ws/monitor") as first:
+                first.receive_json()
+                with client.websocket_connect("/ws/monitor") as second:
+                    second.receive_json()
+                    first.send_json({"command": "force_green"})
+                    with self.assertRaises(WebSocketDisconnect):
+                        first.receive_json()
+
+                    hub.publish({"type": "heartbeat", "data": {"uptime_ms": 1000}})
+                    self.assertEqual(second.receive_json()["type"], "heartbeat")
+
+    def test_connection_becomes_stale_after_heartbeat_timeout(self):
+        self.app.state.runtime._stale_after_seconds = 0.2
+        self.app.state.runtime.connected()
+        boot = parse("SIV,1,0,120,BOOT,0")
+        heartbeat = parse("SIV,1,1,1120,HEARTBEAT,0,G,R,A_VERDE,NORMAL,4000")
+        for message in (boot, heartbeat):
+            result = self.app.state.store.ingest(message)
+            self.app.state.runtime.observe(message, result)
+
+        with TestClient(self.app) as client:
+            with client.websocket_connect("/ws/monitor") as websocket:
+                initial = websocket.receive_json()
+                self.assertTrue(initial["data"]["controller_observed"])
+                update = websocket.receive_json()
+                self.assertEqual(update["type"], "connection")
+                self.assertTrue(update["data"]["state_stale"])
+                self.assertFalse(update["data"]["controller_observed"])
+
+    def test_slow_client_queue_is_bounded_and_keeps_latest(self):
+        async def verify():
+            hub = WebSocketHub(lambda: {"state": "current"}, queue_capacity=2)
+            hub.bind()
+            client = object()
+            queue = asyncio.Queue(maxsize=2)
+            hub._clients.add((client, queue))
+            hub._publish_on_loop({"type": "one"})
+            hub._publish_on_loop({"type": "two"})
+            hub._publish_on_loop({"type": "three"})
+            self.assertEqual(queue.maxsize, 2)
+            self.assertEqual(queue.qsize(), 2)
+            self.assertEqual(await queue.get(), {"type": "two"})
+            self.assertEqual(await queue.get(), {"type": "three"})
+            hub._clients.clear()
+            hub.unbind()
+
+        asyncio.run(verify())
+        self.app.state.websocket_hub.publish({"type": "ignored", "data": {}})
 
 
 if __name__ == "__main__":

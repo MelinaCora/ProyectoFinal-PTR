@@ -1,4 +1,4 @@
-# Backend Fase 4A — API de supervisión
+# Backend Fases 4A y 4B — API de supervisión en tiempo real
 
 Backend FastAPI de solo lectura para recibir SIV v1, guardar eventos e
 incidentes en SQLite y exponer estado y métricas. El backend no envía comandos
@@ -63,7 +63,61 @@ Abrir:
 La API puede iniciarse sin SimulIDE; `/health` marcará la conexión como
 `degraded` mientras no haya un puerto serial conectado. `/api/estado` usa
 `null` para valores aún no recibidos. La disponibilidad del servidor HTTP no
-significa que el controlador esté conectado u operativo.
+significa que el controlador esté conectado u operativo. Si no se recibe un
+heartbeat durante 5 segundos, el estado se informa como desactualizado y
+`controller_observed` pasa a `false`.
+
+## WebSocket de monitoreo
+
+Conectá uno o varios clientes observadores a:
+
+```text
+ws://127.0.0.1:8000/ws/monitor
+```
+
+Al conectar se envía primero una instantánea:
+
+```json
+{
+  "type": "snapshot",
+  "data": {
+    "semaforo_a": "G",
+    "semaforo_b": "R",
+    "fase": "A_VERDE",
+    "modo": "NORMAL",
+    "restante_ms": 4000,
+    "last_heartbeat_received_at": "2026-11-07T10:00:01.000+00:00",
+    "serial_connected": true,
+    "controller_observed": true,
+    "state_stale": false
+  }
+}
+```
+
+Después se reciben mensajes `state`, `heartbeat`, `incident` y `connection`.
+Los mensajes de telemetría incluyen `uptime_ms` (reloj Arduino) y
+`received_at` (hora UTC de recepción backend) por separado. Ejemplos:
+
+```json
+{"type":"state","data":{"secuencia":12,"uptime_ms":4000,"received_at":"2026-11-07T10:00:04.000+00:00","session_id":"...","semaforo_a":"R","semaforo_b":"G","fase":"B_VERDE","modo":"NORMAL","restante_ms":5000}}
+{"type":"incident","data":{"session_id":"...","incident_id":3,"event":"PRIORIDAD_ACTIVADA","secuencia":13,"uptime_ms":5000,"received_at":"2026-11-07T10:00:05.000+00:00","respuesta_ms":0,"semaforo_a":"G","semaforo_b":"R","fase":"PRIORIDAD_A"}}
+{"type":"connection","data":{"serial_connected":false,"controller_observed":false,"state_stale":true,"received_at":"2026-11-07T10:00:06.000+00:00"}}
+```
+
+La cola por cliente tiene capacidad fija de 32 mensajes. Si un cliente lento la
+llena, se descarta el mensaje más antiguo para conservar las actualizaciones
+más recientes; el historial completo sigue disponible en REST/SQLite. Al
+desconectarse, el cliente se elimina y no afecta al receptor serial ni a otros
+clientes. La API solo distribuye observaciones; el WebSocket no acepta comandos.
+Al recibirse un nuevo `BOOT`, se envía un estado desconocido hasta que llegue
+el siguiente `STATE` o `HEARTBEAT`.
+
+Para probar desde la consola del navegador, con Uvicorn local activo:
+
+```javascript
+const monitor = new WebSocket("ws://127.0.0.1:8000/ws/monitor");
+monitor.onmessage = ({ data }) => console.log(JSON.parse(data));
+```
 
 ## Pruebas
 
@@ -73,8 +127,9 @@ Desde la raíz del repositorio, con las dependencias instaladas:
 python -m unittest discover -s backend/tests -v
 ```
 
-Las pruebas usan bases temporales y fixtures del protocolo; no requieren
-SimulIDE, `socat` ni hardware.
+Las pruebas usan bases temporales y fixtures del protocolo; cubren la API REST,
+persistencia, distribución WebSocket, varios clientes, colas llenas y
+desconexión serial. No requieren SimulIDE, `socat` ni hardware.
 
 ## Datos y limitaciones
 
