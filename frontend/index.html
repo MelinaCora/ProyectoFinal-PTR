@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#10161d">
+    <meta name="description" content="Panel local de supervisión del Sistema Inteligente de Vigilancia Vial.">
+    <title>SIV | Centro de operaciones</title>
+    <link rel="stylesheet" href="./css/styles.css">
+    <script type="module" src="./js/app.js"></script>
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar" aria-label="Navegación principal">
+        <a class="brand" href="#resumen" data-view="resumen" aria-label="SIV, ir al resumen">
+          <span class="brand-mark" aria-hidden="true">SIV</span>
+          <span class="brand-copy">
+            <strong>Vigilancia vial</strong>
+            <small>Centro de operaciones</small>
+          </span>
+        </a>
+
+        <div class="nav-label">SISTEMA</div>
+        <nav class="primary-nav">
+          <button class="nav-link is-active" type="button" data-view="resumen" aria-label="Resumen" aria-current="page">
+            <span class="nav-icon" aria-hidden="true">01</span><span>Resumen</span>
+          </button>
+          <button class="nav-link" type="button" data-view="monitoreo" aria-label="Monitoreo">
+            <span class="nav-icon" aria-hidden="true">02</span><span>Monitoreo</span>
+          </button>
+          <button class="nav-link" type="button" data-view="emergencias" aria-label="Emergencias">
+            <span class="nav-icon" aria-hidden="true">03</span><span>Emergencias</span>
+          </button>
+          <button class="nav-link" type="button" data-view="estadisticas" aria-label="Estadísticas">
+            <span class="nav-icon" aria-hidden="true">04</span><span>Estadísticas</span>
+          </button>
+        </nav>
+
+        <div class="sidebar-bottom">
+          <div class="sidebar-system">
+            <span class="status-dot status-dot--green" aria-hidden="true"></span>
+            <span><strong>Entorno local</strong><small>Solo supervisión</small></span>
+          </div>
+          <div class="sidebar-build">SIV · INTERSECCIÓN INT-001</div>
+        </div>
+      </aside>
+
+      <div class="workspace">
+        <header class="topbar">
+          <div class="system-name">
+            <span class="system-overline">SISTEMA DE CONTROL</span>
+            <strong>SIV <span>— Sistema Inteligente de Vigilancia Vial</span></strong>
+          </div>
+          <div class="topbar-meta">
+            <span class="intersection-code"><span class="meta-label">INTERSECCIÓN</span><strong>INT-001</strong></span>
+            <span class="connection-pill"><span class="status-dot status-dot--amber" aria-hidden="true"></span><span id="connection-label">Demostración local</span></span>
+            <time class="clock" id="local-clock" aria-label="Hora local"></time>
+          </div>
+        </header>
+
+        <main class="main-content">
+          <div class="demo-banner">
+            <span class="demo-indicator" aria-hidden="true"></span>
+            <span><strong>MODO DEMOSTRACIÓN</strong><span class="demo-separator">/</span> Datos locales de ejemplo; no corresponden a mediciones reales.</span>
+            <span class="demo-version">FASE 5A</span>
+          </div>
+
+          <section class="view-panel is-visible" id="view-resumen" data-panel="resumen" aria-labelledby="page-title-resumen">
+            <div class="page-heading">
+              <div><p class="eyebrow">VISTA GENERAL <span>/</span> INT-001</p><h1 id="page-title-resumen">Resumen operativo</h1><p class="page-description">Estado del controlador y actividad reciente del sistema.</p></div>
+              <span class="updated-label"><span class="status-dot status-dot--amber" aria-hidden="true"></span>Datos de demostración</span>
+            </div>
+            <div id="summary-metrics" class="metric-grid" aria-label="Indicadores principales"></div>
+            <div class="section-heading"><div><p class="eyebrow">ESTADO EN TIEMPO REAL</p><h2>Monitoreo de semáforos</h2></div><button class="text-button" type="button" data-view="monitoreo">Ver detalle <span aria-hidden="true">→</span></button></div>
+            <div id="summary-signals" class="signal-grid"></div>
+            <div class="content-grid content-grid--summary">
+              <section class="panel activity-panel" aria-labelledby="summary-activity-title">
+                <div class="panel-heading"><div><p class="eyebrow">REGISTRO DEL SISTEMA</p><h2 id="summary-activity-title">Actividad reciente</h2></div><button class="text-button" type="button" data-view="emergencias">Ver emergencias <span aria-hidden="true">→</span></button></div>
+                <div id="summary-activity" class="activity-list"></div>
+              </section>
+              <section class="panel controller-panel" aria-labelledby="summary-controller-title">
+                <div class="panel-heading"><div><p class="eyebrow">CONTROLADOR</p><h2 id="summary-controller-title">Salud del sistema</h2></div></div>
+                <div id="summary-health"></div>
+              </section>
+            </div>
+          </section>
+
+          <section class="view-panel" id="view-monitoreo" data-panel="monitoreo" aria-labelledby="page-title-monitoreo" hidden>
+            <div class="page-heading">
+              <div><p class="eyebrow">SUPERVISIÓN TÉCNICA <span>/</span> INT-001</p><h1 id="page-title-monitoreo">Monitoreo</h1><p class="page-description">Telemetría y estado operativo informado por el controlador.</p></div>
+              <span class="mode-badge" id="monitor-mode"></span>
+            </div>
+            <div id="monitor-signals" class="signal-grid"></div>
+            <div class="monitor-grid">
+              <section class="panel" aria-labelledby="fsm-title"><div class="panel-heading"><div><p class="eyebrow">LÓGICA DE CONTROL</p><h2 id="fsm-title">Máquina de estados</h2></div></div><div id="monitor-fsm"></div></section>
+              <section class="panel" aria-labelledby="telemetry-title"><div class="panel-heading"><div><p class="eyebrow">COMUNICACIÓN</p><h2 id="telemetry-title">Telemetría</h2></div></div><div id="monitor-telemetry"></div></section>
+            </div>
+            <section class="panel monitor-activity" aria-labelledby="monitor-activity-title"><div class="panel-heading"><div><p class="eyebrow">SECUENCIA DE EVENTOS</p><h2 id="monitor-activity-title">Actividad del sistema</h2></div><span class="count-label" id="monitor-event-count"></span></div><div id="monitor-activity" class="activity-list"></div></section>
+          </section>
+
+          <section class="view-panel" id="view-emergencias" data-panel="emergencias" aria-labelledby="page-title-emergencias" hidden>
+            <div class="page-heading">
+              <div><p class="eyebrow">HISTORIAL <span>/</span> INT-001</p><h1 id="page-title-emergencias">Emergencias</h1><p class="page-description">Incidentes registrados en el conjunto de datos de demostración.</p></div>
+              <span class="count-chip" id="incident-count"></span>
+            </div>
+            <section class="panel table-panel" aria-label="Historial de incidentes">
+              <div class="table-toolbar">
+                <label class="search-field"><span class="sr-only">Buscar por ID de incidente</span><span class="search-icon" aria-hidden="true">⌕</span><input id="incident-search" type="search" placeholder="Buscar ID de incidente…" autocomplete="off"></label>
+                <div class="table-filters">
+                  <label class="select-label"><span>Estado</span><select id="incident-status"><option value="todos">Todos</option><option value="RECUPERADA">Recuperada</option><option value="FINALIZADA">Finalizada</option><option value="PRIORIDAD_ACTIVADA">Prioridad activa</option><option value="DETECTADA">Detectada</option><option value="INCOMPLETO">Incompleta</option></select></label>
+                  <label class="select-label"><span>Fecha</span><select id="incident-order"><option value="desc">Más recientes</option><option value="asc">Más antiguas</option></select></label>
+                </div>
+              </div>
+              <div class="table-scroll"><table><thead><tr><th scope="col">INCIDENTE</th><th scope="col">FECHA Y HORA</th><th scope="col">ESTADO</th><th scope="col">RESPUESTA</th><th scope="col">DURACIÓN</th><th scope="col">RECUPERACIÓN</th><th scope="col"><span class="sr-only">Detalle</span></th></tr></thead><tbody id="incident-rows"></tbody></table></div>
+              <div id="incident-empty" class="empty-state" hidden><span class="empty-mark" aria-hidden="true">—</span><strong>No hay incidentes para mostrar</strong><span>Ajustá la búsqueda o los filtros seleccionados.</span></div>
+              <div class="table-footer"><span id="incident-results"></span><span>Fuente: datos locales de demostración</span></div>
+            </section>
+          </section>
+
+          <section class="view-panel" id="view-estadisticas" data-panel="estadisticas" aria-labelledby="page-title-estadisticas" hidden>
+            <div class="page-heading">
+              <div><p class="eyebrow">ANÁLISIS OPERATIVO <span>/</span> INT-001</p><h1 id="page-title-estadisticas">Estadísticas</h1><p class="page-description">Indicadores calculados a partir de los incidentes de demostración.</p></div>
+              <span class="updated-label"><span class="status-dot status-dot--amber" aria-hidden="true"></span>Datos locales</span>
+            </div>
+            <div id="statistics-metrics" class="metric-grid metric-grid--stats"></div>
+            <div class="stats-grid">
+              <section class="panel chart-panel" aria-labelledby="daily-chart-title"><div class="panel-heading"><div><p class="eyebrow">VOLUMEN DE INCIDENTES</p><h2 id="daily-chart-title">Evolución por día</h2></div><span class="chart-unit">incidentes / día</span></div><div id="daily-chart" class="chart-container"></div></section>
+              <section class="panel chart-panel" aria-labelledby="status-chart-title"><div class="panel-heading"><div><p class="eyebrow">CICLO DE ATENCIÓN</p><h2 id="status-chart-title">Estado de incidentes</h2></div></div><div id="status-chart" class="status-distribution"></div></section>
+            </div>
+            <p class="data-note"><span class="status-dot status-dot--amber" aria-hidden="true"></span> Las métricas se calculan solo con los registros que tienen datos válidos disponibles. No representan mediciones reales.</p>
+          </section>
+        </main>
+        <footer class="app-footer"><span>SIV <span class="footer-divider">/</span> Supervisión de intersección</span><span>INT-001 <span class="footer-divider">·</span> Interfaz local de demostración</span></footer>
+      </div>
+    </div>
+
+    <dialog id="incident-dialog" class="incident-dialog" aria-labelledby="dialog-title">
+      <div class="dialog-header"><div><p class="eyebrow">DETALLE DEL INCIDENTE</p><h2 id="dialog-title"></h2></div><button class="icon-button" id="dialog-close" type="button" aria-label="Cerrar detalle">×</button></div>
+      <div id="dialog-content"></div>
+    </dialog>
+  </body>
+</html>
