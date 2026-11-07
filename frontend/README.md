@@ -1,29 +1,55 @@
-# Dashboard web SIV — Fase 5A
+# Dashboard web SIV — Fase 5B
 
-Interfaz local de demostración para supervisar el controlador y consultar
-incidentes. No se conecta a FastAPI, WebSocket ni al hardware; los registros
-están definidos en `js/mock-data.js` y no representan mediciones reales.
+Dashboard local de supervisión para FastAPI. No controla Arduino. Los datos se
+obtienen de la API REST y del WebSocket; no se usan fixtures de demostración.
 
-## Ejecutar
+## Iniciar los servicios
 
-Desde la raíz del repositorio:
+1. En la raíz del repositorio, activar el entorno Python del backend e iniciar
+   FastAPI:
+
+   ```bash
+   python -m uvicorn backend.app.main:app --host 127.0.0.1 --port 8000
+   ```
+
+2. En otra terminal, servir el frontend:
+
+   ```bash
+   python -m http.server 8080 --directory frontend
+   ```
+
+3. Abrir <http://localhost:8080>. El frontend deriva el host del navegador y
+   usa el puerto `8000` para REST y WebSocket. Para verificar FastAPI, abrir
+   <http://localhost:8000/health>.
+
+La API permite solicitudes GET desde `http://localhost:8080` y
+`http://127.0.0.1:8080`. El WebSocket de observación usa
+`ws://<host-del-navegador>:8000/ws/monitor` (o `wss` si la página usa HTTPS).
+
+## Conexión y datos
+
+El indicador superior distingue backend no disponible, serial desconectado,
+telemetría desactualizada y controlador observado. El estado inicial se carga
+por REST; los cambios se reciben por WebSocket y se reintenta la conexión con
+espera progresiva. Si SimulIDE o el puerto serial no están conectados, FastAPI
+puede seguir disponible, pero el panel informa que no hay telemetría reciente
+y oculta el tiempo restante obsoleto. El historial y métricas se leen desde
+SQLite mediante los endpoints existentes.
+
+## Pruebas
+
+Pruebas frontend, sin instalar dependencias:
 
 ```bash
-python -m http.server 8080 --directory frontend
+npm test --prefix frontend
 ```
 
-Abrir <http://localhost:8080>. También puede usarse cualquier servidor estático
-local que sirva módulos ES desde `index.html`.
+Pruebas backend (incluyen los orígenes CORS permitidos):
 
-## Vistas
+```bash
+python -m unittest discover -s backend/tests -v
+```
 
-- **Resumen:** indicadores, estado de los dos semáforos y últimos eventos.
-- **Monitoreo:** modo FSM, tiempo restante, heartbeat y sesión de demostración.
-- **Emergencias:** búsqueda por identificador, filtros, orden y detalle del ciclo.
-- **Estadísticas:** métricas calculadas desde incidentes y gráficos SVG nativos.
-
-La aplicación separa los datos de demostración (`js/mock-data.js`), el estado y
-las interacciones (`js/app.js`) y la presentación (`css/styles.css`).
-`calculateMetrics` recibe registros con los nombres de campos de incidentes de
-la API, de modo que la siguiente fase pueda sustituir la fuente sin acoplar los
-componentes a los mocks. No hay acciones para controlar los semáforos.
+Las pruebas automatizadas no requieren SimulIDE. La comprobación de extremo a
+extremo con telemetría UART requiere iniciar el circuito, `socat` y el backend
+con el puerto serial configurado.

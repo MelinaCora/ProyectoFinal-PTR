@@ -2,6 +2,7 @@ import asyncio
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Query, WebSocket
+from fastapi.middleware.cors import CORSMiddleware
 
 from .config import Settings
 from .serial_service import RuntimeStatus, SerialWorker, websocket_message
@@ -87,6 +88,15 @@ def create_app(settings=None, serial_factory=None):
         version="1.0.0",
         description="API de solo lectura para eventos SIV v1.",
         lifespan=lifespan,
+    )
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=[
+            "http://localhost:8080",
+            "http://127.0.0.1:8080",
+        ],
+        allow_methods=["GET"],
+        allow_headers=["Accept"],
     )
     app.state.store = store
     app.state.runtime = runtime

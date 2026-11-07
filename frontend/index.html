@@ -53,22 +53,27 @@
           </div>
           <div class="topbar-meta">
             <span class="intersection-code"><span class="meta-label">INTERSECCIÓN</span><strong>INT-001</strong></span>
-            <span class="connection-pill"><span class="status-dot status-dot--amber" aria-hidden="true"></span><span id="connection-label">Demostración local</span></span>
+            <span class="connection-pill"><span class="status-dot status-dot--amber" aria-hidden="true"></span><span id="connection-label">Conectando con FastAPI…</span></span>
             <time class="clock" id="local-clock" aria-label="Hora local"></time>
           </div>
         </header>
 
         <main class="main-content">
-          <div class="demo-banner">
+          <div class="demo-banner backend-status-banner--warning" id="backend-status-banner" role="status" aria-live="polite">
             <span class="demo-indicator" aria-hidden="true"></span>
-            <span><strong>MODO DEMOSTRACIÓN</strong><span class="demo-separator">/</span> Datos locales de ejemplo; no corresponden a mediciones reales.</span>
-            <span class="demo-version">FASE 5A</span>
+            <span><strong id="backend-status-title">CONECTANDO</strong><span class="demo-separator">/</span><span id="backend-status-description">Consultando estado y métricas de FastAPI…</span></span>
+            <span class="demo-version">INT-001</span>
+          </div>
+          <div class="incident-alert" id="incident-alert" role="alert" aria-live="assertive" hidden>
+            <span class="status-dot status-dot--amber" aria-hidden="true"></span>
+            <span><strong id="incident-alert-title"></strong><small id="incident-alert-description"></small></span>
+            <button type="button" id="incident-alert-close" aria-label="Cerrar alerta">×</button>
           </div>
 
           <section class="view-panel is-visible" id="view-resumen" data-panel="resumen" aria-labelledby="page-title-resumen">
             <div class="page-heading">
               <div><p class="eyebrow">VISTA GENERAL <span>/</span> INT-001</p><h1 id="page-title-resumen">Resumen operativo</h1><p class="page-description">Estado del controlador y actividad reciente del sistema.</p></div>
-              <span class="updated-label"><span class="status-dot status-dot--amber" aria-hidden="true"></span>Datos de demostración</span>
+              <span class="updated-label"><span class="status-dot status-dot--green" aria-hidden="true"></span>FastAPI + WebSocket</span>
             </div>
             <div id="summary-metrics" class="metric-grid" aria-label="Indicadores principales"></div>
             <div class="section-heading"><div><p class="eyebrow">ESTADO EN TIEMPO REAL</p><h2>Monitoreo de semáforos</h2></div><button class="text-button" type="button" data-view="monitoreo">Ver detalle <span aria-hidden="true">→</span></button></div>
@@ -100,7 +105,7 @@
 
           <section class="view-panel" id="view-emergencias" data-panel="emergencias" aria-labelledby="page-title-emergencias" hidden>
             <div class="page-heading">
-              <div><p class="eyebrow">HISTORIAL <span>/</span> INT-001</p><h1 id="page-title-emergencias">Emergencias</h1><p class="page-description">Incidentes registrados en el conjunto de datos de demostración.</p></div>
+              <div><p class="eyebrow">HISTORIAL <span>/</span> INT-001</p><h1 id="page-title-emergencias">Emergencias</h1><p class="page-description">Incidentes persistidos en el historial del sistema.</p></div>
               <span class="count-chip" id="incident-count"></span>
             </div>
             <section class="panel table-panel" aria-label="Historial de incidentes">
@@ -113,13 +118,13 @@
               </div>
               <div class="table-scroll"><table><thead><tr><th scope="col">INCIDENTE</th><th scope="col">FECHA Y HORA</th><th scope="col">ESTADO</th><th scope="col">RESPUESTA</th><th scope="col">DURACIÓN</th><th scope="col">RECUPERACIÓN</th><th scope="col"><span class="sr-only">Detalle</span></th></tr></thead><tbody id="incident-rows"></tbody></table></div>
               <div id="incident-empty" class="empty-state" hidden><span class="empty-mark" aria-hidden="true">—</span><strong>No hay incidentes para mostrar</strong><span>Ajustá la búsqueda o los filtros seleccionados.</span></div>
-              <div class="table-footer"><span id="incident-results"></span><span>Fuente: datos locales de demostración</span></div>
+              <div class="table-footer"><span id="incident-results"></span><span>Fuente: historial persistido en SQLite</span></div>
             </section>
           </section>
 
           <section class="view-panel" id="view-estadisticas" data-panel="estadisticas" aria-labelledby="page-title-estadisticas" hidden>
             <div class="page-heading">
-              <div><p class="eyebrow">ANÁLISIS OPERATIVO <span>/</span> INT-001</p><h1 id="page-title-estadisticas">Estadísticas</h1><p class="page-description">Indicadores calculados a partir de los incidentes de demostración.</p></div>
+              <div><p class="eyebrow">ANÁLISIS OPERATIVO <span>/</span> INT-001</p><h1 id="page-title-estadisticas">Estadísticas</h1><p class="page-description">Indicadores calculados a partir de datos disponibles en FastAPI.</p></div>
               <span class="updated-label"><span class="status-dot status-dot--amber" aria-hidden="true"></span>Datos locales</span>
             </div>
             <div id="statistics-metrics" class="metric-grid metric-grid--stats"></div>
@@ -130,7 +135,7 @@
             <p class="data-note"><span class="status-dot status-dot--amber" aria-hidden="true"></span> Las métricas se calculan solo con los registros que tienen datos válidos disponibles. No representan mediciones reales.</p>
           </section>
         </main>
-        <footer class="app-footer"><span>SIV <span class="footer-divider">/</span> Supervisión de intersección</span><span>INT-001 <span class="footer-divider">·</span> Interfaz local de demostración</span></footer>
+        <footer class="app-footer"><span>SIV <span class="footer-divider">/</span> Supervisión de intersección</span><span>INT-001 <span class="footer-divider">·</span> API REST + WebSocket</span></footer>
       </div>
     </div>
 

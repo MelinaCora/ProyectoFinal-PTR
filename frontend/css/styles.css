@@ -172,6 +172,20 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .demo-indicator { width: 6px; height: 6px; border-radius: 1px; background: var(--amber); }
 .demo-separator { padding: 0 7px; color: #766b54; }
 .demo-version { margin-left: auto; color: #968665; font: 9px var(--mono); }
+.demo-banner:not(.backend-status-banner--error):not(.backend-status-banner--warning) { border-color: #315343; background: #19251f; color: #a7c3b1; }
+.demo-banner:not(.backend-status-banner--error):not(.backend-status-banner--warning) strong { color: #8bd0aa; }
+.demo-banner:not(.backend-status-banner--error):not(.backend-status-banner--warning) .demo-indicator { background: var(--green); }
+.backend-status-banner--warning { border-color: #4a3e2a; background: #211e19; }
+.backend-status-banner--error { border-color: #59383b; background: #241a1d; color: #d3a3a4; }
+.backend-status-banner--error strong { color: #e39a9b; }
+.backend-status-banner--error .demo-indicator { background: var(--red); }
+.incident-alert { display: flex; align-items: center; gap: 10px; margin-top: 9px; padding: 9px 11px; border: 1px solid #55482c; border-radius: 4px; background: #211e19; color: #dfc075; }
+.incident-alert[hidden] { display: none; }
+.incident-alert > span:nth-child(2) { display: grid; min-width: 0; gap: 1px; }
+.incident-alert strong { font-size: 10px; font-weight: 600; }
+.incident-alert small { overflow: hidden; color: #b7a982; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.incident-alert button { margin-left: auto; padding: 0 4px; border: 0; background: transparent; color: #baaa83; cursor: pointer; font-size: 18px; line-height: 1; }
+.incident-alert button:hover { color: #eee0b9; }
 .view-panel { display: none; padding-top: 25px; }
 .view-panel.is-visible { display: block; animation: appear .16s ease-out; }
 @keyframes appear { from { opacity: .8; transform: translateY(2px); } to { opacity: 1; transform: translateY(0); } }

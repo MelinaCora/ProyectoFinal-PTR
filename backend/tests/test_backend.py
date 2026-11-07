@@ -170,6 +170,26 @@ class ApiTests(unittest.TestCase):
             self.request("GET", "/api/emergencias?limit=0").status_code, 422
         )
 
+    def test_cors_is_limited_to_local_dashboard_origins(self):
+        with TestClient(self.app) as client:
+            allowed = client.get(
+                "/health", headers={"Origin": "http://localhost:8080"}
+            )
+            allowed_loopback = client.get(
+                "/health", headers={"Origin": "http://127.0.0.1:8080"}
+            )
+            rejected = client.get(
+                "/health", headers={"Origin": "http://example.com"}
+            )
+        self.assertEqual(
+            allowed.headers["access-control-allow-origin"], "http://localhost:8080"
+        )
+        self.assertEqual(
+            allowed_loopback.headers["access-control-allow-origin"],
+            "http://127.0.0.1:8080",
+        )
+        self.assertNotIn("access-control-allow-origin", rejected.headers)
+
     def test_history_detail_pagination_and_metrics(self):
         store = self.app.state.store
         for sequence, incident_id, response in ((1, 21, 100), (2, 22, 300)):
