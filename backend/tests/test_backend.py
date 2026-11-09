@@ -166,9 +166,31 @@ class ApiTests(unittest.TestCase):
                 "response_max_ms": None,
             },
         )
+        analytics = self.request("GET", "/api/metricas?detalle=true").json()
+        self.assertEqual(analytics["total"], 0)
+        self.assertEqual(analytics["completed"], 0)
+        self.assertEqual(analytics["pending"], 0)
+        self.assertEqual(analytics["status_counts"], {})
+        self.assertEqual(analytics["response_series"], [])
         self.assertEqual(self.request("GET", "/api/emergencias/1").status_code, 404)
         self.assertEqual(
             self.request("GET", "/api/emergencias?limit=0").status_code, 422
+        )
+        self.assertEqual(
+            self.request(
+                "GET",
+                "/api/emergencias?desde=2026-01-02T00%3A00%3A00"
+                "&hasta=2026-01-03T00%3A00%3A00Z",
+            ).status_code,
+            422,
+        )
+        self.assertEqual(
+            self.request(
+                "GET",
+                "/api/metricas?detalle=true&desde=2026-01-03T00%3A00%3A00Z"
+                "&hasta=2026-01-02T00%3A00%3A00Z",
+            ).status_code,
+            422,
         )
         self.assertEqual(
             self.request("GET", "/api/emergencias?limit=100&offset=0").json(),
@@ -241,6 +263,132 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(metrics["response_average_ms"], 200.0)
         self.assertEqual(metrics["response_min_ms"], 100)
         self.assertEqual(metrics["response_max_ms"], 300)
+
+    def test_period_analytics_filters_nulls_and_exports_event_times(self):
+        store = self.app.state.store
+        rows = [
+            (
+                "SIV,1,1,100,EMERGENCIA_DETECTADA,31,A,R,G,B_VERDE,25",
+                "2026-01-01T10:00:00+00:00",
+            ),
+            (
+                "SIV,1,2,500,PRIORIDAD_ACTIVADA,31,0,G,R,PRIORIDAD_A",
+                "2026-01-01T10:00:01+00:00",
+            ),
+            (
+                "SIV,1,3,1200,EMERGENCIA_FINALIZADA,31,700",
+                "2026-01-01T10:00:02+00:00",
+            ),
+            (
+                "SIV,1,4,1500,CICLO_RECUPERADO,31,300",
+                "2026-01-01T10:00:03+00:00",
+            ),
+            (
+                "SIV,1,5,2000,EMERGENCIA_DETECTADA,32,A,R,G,B_VERDE,25",
+                "2026-01-02T13:00:00+03:00",
+            ),
+            (
+                "SIV,1,6,3000,PRIORIDAD_ACTIVADA,33,1000,G,R,PRIORIDAD_A",
+                "2026-01-03T10:00:00+00:00",
+            ),
+        ]
+        for line, received_at in rows:
+            store.ingest(parse(line), received_at)
+
+        analytics = self.request("GET", "/api/metricas?detalle=true").json()
+        self.assertEqual(analytics["total"], 3)
+        self.assertEqual(analytics["completed"], 1)
+        self.assertEqual(analytics["pending"], 2)
+        self.assertEqual(analytics["completed"] + analytics["pending"], analytics["total"])
+        self.assertEqual(analytics["response_count"], 2)
+        self.assertEqual(analytics["response_average_ms"], 500)
+        self.assertEqual(analytics["response_min_ms"], 0)
+        self.assertEqual(analytics["response_max_ms"], 1000)
+        self.assertEqual(analytics["duration_average_ms"], 700)
+        self.assertEqual(analytics["recovery_average_ms"], 300)
+        self.assertEqual(
+            analytics["status_counts"],
+            {"DETECTADA": 1, "PRIORIDAD_ACTIVADA": 1, "RECUPERADA": 1},
+        )
+        self.assertEqual(sum(analytics["status_counts"].values()), analytics["total"])
+        self.assertEqual(
+            analytics["incidents_by_day"],
+            {"2026-01-01": 1, "2026-01-02": 1, "2026-01-03": 1},
+        )
+        self.assertEqual(sum(analytics["incidents_by_day"].values()), analytics["total"])
+        self.assertEqual(
+            [row["response_ms"] for row in analytics["response_series"]],
+            [0, 1000],
+        )
+
+        filtered = self.request(
+            "GET",
+            "/api/emergencias?desde=2026-01-02T00%3A00%3A00Z"
+            "&hasta=2026-01-03T00%3A00%3A00Z&estado=DETECTADA",
+        ).json()
+        self.assertEqual(filtered["total"], 1)
+        self.assertEqual(filtered["items"][0]["incident_id"], 32)
+        exact_start = self.request(
+            "GET",
+            "/api/emergencias?desde=2026-01-02T10%3A00%3A00Z"
+            "&hasta=2026-01-02T10%3A00%3A01Z",
+        ).json()
+        exact_end = self.request(
+            "GET",
+            "/api/emergencias?desde=2026-01-02T10%3A00%3A01Z"
+            "&hasta=2026-01-02T11%3A00%3A00Z",
+        ).json()
+        self.assertEqual(exact_start["total"], 1)
+        self.assertEqual(exact_end["total"], 0)
+        self.assertEqual(
+            self.request(
+                "GET",
+                "/api/metricas?detalle=true&desde=2026-01-02T00%3A00%3A00Z"
+                "&hasta=2026-01-03T00%3A00%3A00Z",
+            ).json()["total"],
+            1,
+        )
+
+        exported = self.request(
+            "GET",
+            "/api/emergencias/export.csv?estado=RECUPERADA"
+            "&buscar=31&orden=asc",
+        )
+        self.assertEqual(exported.status_code, 200)
+        self.assertTrue(exported.content.startswith(b"\xef\xbb\xbf"))
+        csv_text = exported.content.decode("utf-8-sig")
+        self.assertIn("Tiempo de respuesta (ms)", csv_text)
+        self.assertIn("2026-01-01T10:00:01.000+00:00", csv_text)
+        self.assertEqual(csv_text.count("\r\n"), 2)
+
+    def test_filtered_history_paginates_beyond_one_hundred_records(self):
+        store = self.app.state.store
+        for incident_id in range(1, 1006):
+            store.ingest(
+                parse(
+                    "SIV,1,{},{},".format(incident_id, incident_id * 100)
+                    + "PRIORIDAD_ACTIVADA,{},{},G,R,PRIORIDAD_A".format(
+                        incident_id, incident_id
+                    )
+                ),
+                "2026-02-01T00:00:{:02d}+00:00".format(incident_id % 60),
+            )
+
+        first = self.request("GET", "/api/emergencias?limit=100&offset=0").json()
+        second = self.request("GET", "/api/emergencias?limit=100&offset=100").json()
+        third = self.request("GET", "/api/emergencias?limit=100&offset=1000").json()
+        self.assertEqual(first["total"], 1005)
+        self.assertEqual(len(first["items"]), 100)
+        self.assertEqual(len(second["items"]), 100)
+        self.assertEqual(len(third["items"]), 5)
+
+        analytics = self.request("GET", "/api/metricas?detalle=true").json()
+        self.assertEqual(analytics["response_count"], 1005)
+        self.assertEqual(len(analytics["response_series"]), 1000)
+        self.assertTrue(all(item["response_ms"] > 0 for item in analytics["response_series"]))
+
+        exported = self.request("GET", "/api/emergencias/export.csv")
+        self.assertEqual(exported.content.decode("utf-8-sig").count("\r\n"), 1006)
 
 
 class SerialWorkerTests(unittest.TestCase):

@@ -1,12 +1,14 @@
 import {
-  getAllIncidents,
+  getAnalytics,
+  getIncidentsCsvUrl,
+  getIncidentsPage,
   getHealth,
   getIncident,
   getMetrics,
   getState,
 } from "./api.js";
 import { classifyBackendStatus } from "./backend-status.js";
-import { calculateMetrics } from "./metrics.js";
+import { calculateMetrics, getPeriodRange } from "./metrics.js";
 import { connectMonitor } from "./websocket.js";
 
 const UNKNOWN_STATE = {
@@ -28,8 +30,12 @@ const state = {
   data: {
     state: { ...UNKNOWN_STATE },
     incidents: [],
+    incidentTotal: 0,
+    latestIncident: null,
+    latestIncidentLoaded: false,
     events: [],
     metrics: null,
+    analytics: null,
     health: null,
     apiAvailable: false,
     websocketConnected: false,
@@ -41,11 +47,20 @@ const state = {
   search: "",
   statusFilter: "todos",
   dateOrder: "desc",
+  historyPage: 0,
+  pageSize: 25,
+  historyRequestId: 0,
+  analyticsRequestId: 0,
+  historyLoading: false,
+  analyticsLoading: false,
+  period: { value: "7d", from: "", to: "" },
+  periodRange: null,
   previousStale: true,
   disconnectSocket: null,
   refreshTimer: null,
   staleTimer: null,
   alertTimer: null,
+  searchTimer: null,
   clockTimer: null,
   healthTimer: null,
   incidentRefreshTimer: null,
@@ -238,7 +253,7 @@ function dashboardMetrics() {
 function renderSummary() {
   const { data } = state;
   const metrics = dashboardMetrics();
-  const latest = data.incidents[0];
+  const latest = data.latestIncident;
   const controllerHealthy = data.state.controller_observed
     && !stateMeasurementStale(data.state)
     && (data.apiAvailable || data.websocketConnected);
@@ -322,19 +337,39 @@ function renderMonitor() {
   $("#monitor-activity").innerHTML = renderActivity(state.data.events);
 }
 
-function filteredIncidents() {
-  const query = state.search.trim().replace(/^#/, "").toLowerCase();
-  return state.data.incidents
-    .filter((incident) => !query || String(incident.incident_id).includes(query) || String(incident.id).includes(query))
-    .filter((incident) => state.statusFilter === "todos" || incident.status === state.statusFilter)
-    .sort((a, b) => {
-      const difference = new Date(a.first_received_at) - new Date(b.first_received_at);
-      return state.dateOrder === "asc" ? difference : -difference;
-    });
+function selectedPeriod() {
+  if (!state.periodRange) {
+    state.periodRange = getPeriodRange(state.period.value, state.period.from, state.period.to);
+  }
+  return state.periodRange;
+}
+
+function renewPeriodRange() {
+  state.periodRange = getPeriodRange(
+    state.period.value,
+    state.period.from,
+    state.period.to,
+  );
+}
+
+function historyFilters() {
+  const period = selectedPeriod();
+  return {
+    ...(period.error ? {} : { start: period.start, end: period.end }),
+    status: state.statusFilter,
+    search: state.search,
+    order: state.dateOrder,
+  };
+}
+
+function statisticsFilters() {
+  const period = selectedPeriod();
+  return period.error ? null : { start: period.start, end: period.end };
 }
 
 function renderIncidents() {
-  const incidents = filteredIncidents();
+  const incidents = state.data.incidents;
+  const total = state.data.incidentTotal;
   const tbody = $("#incident-rows");
   tbody.innerHTML = incidents.map((incident) => `<tr>
     <td><span class="incident-id">#${escapeHTML(incident.incident_id)}</span><span class="cell-subtext">${escapeHTML((incident.session_id || "—").slice(0, 14))}${incident.session_id ? "…" : ""}</span></td>
@@ -345,22 +380,31 @@ function renderIncidents() {
     <td class="duration-cell">${escapeHTML(formatDuration(incident.recovery_ms))}</td>
     <td><button class="row-action" type="button" data-incident-id="${escapeHTML(incident.id)}" aria-label="Ver detalle del incidente ${escapeHTML(incident.incident_id)}">Detalle <span aria-hidden="true">→</span></button></td>
   </tr>`).join("");
-  $("#incident-count").textContent = state.data.metrics
-    ? `${state.data.metrics.total} incidentes`
-    : "— incidentes";
+  $("#incident-count").textContent = `${total} ${total === 1 ? "incidente" : "incidentes"}`;
   $("#incident-empty").hidden = incidents.length > 0;
   $(".table-scroll").hidden = incidents.length === 0;
-  $("#incident-results").textContent = state.data.apiAvailable
-    ? `Mostrando ${incidents.length} de ${state.data.incidents.length} incidentes`
+  $("#incident-results").textContent = state.historyLoading
+    ? "Consultando historial…"
+    : state.data.apiAvailable
+    ? `Mostrando ${incidents.length ? state.historyPage * state.pageSize + 1 : 0}–${state.historyPage * state.pageSize + incidents.length} de ${total}`
     : "Historial no disponible: backend desconectado";
   if (!incidents.length) {
     $("#incident-empty").querySelector("strong").textContent = state.data.apiAvailable
-      ? "No hay incidentes para mostrar"
+      ? state.historyLoading ? "Cargando historial" : "No hay incidentes para mostrar"
       : "Historial no disponible";
     $("#incident-empty").querySelector("span").textContent = state.data.apiAvailable
-      ? "No hay registros o ningún incidente coincide con la búsqueda y los filtros."
+      ? state.historyLoading
+        ? "Se están consultando los registros persistidos."
+        : "No hay registros o ningún incidente coincide con la búsqueda y los filtros."
       : "El historial persistido se mostrará al restablecer FastAPI.";
   }
+  const pageCount = Math.max(1, Math.ceil(total / state.pageSize));
+  $("#incident-page").textContent = `Página ${Math.min(state.historyPage + 1, pageCount)} de ${pageCount}`;
+  $("#incident-previous").disabled = state.historyLoading || state.historyPage === 0;
+  $("#incident-next").disabled = state.historyLoading || state.historyPage + 1 >= pageCount;
+  $("#incident-export").disabled = state.historyLoading
+    || !state.data.apiAvailable
+    || Boolean(selectedPeriod().error);
 }
 
 async function renderIncidentDetail(rowId) {
@@ -393,56 +437,127 @@ async function renderIncidentDetail(rowId) {
 }
 
 function renderStatistics() {
-  const metrics = dashboardMetrics();
-  const available = Boolean(state.data.metrics);
+  const metrics = state.data.analytics;
+  const available = Boolean(metrics);
+  const statisticsError = Boolean(state.data.resourceErrors["estadísticas"]);
   $("#statistics-metrics").innerHTML = [
-    renderMetricCard({ label: "Total de emergencias", value: available ? String(metrics.total) : "—", note: available ? "Registros persistidos" : "No disponible" }),
-    renderMetricCard({ label: "Respuesta promedio", value: formatDuration(metrics.response_average_ms), note: available ? `${metrics.response_count} registros con medición` : "No disponible" }),
-    renderMetricCard({ label: "Respuesta mínima", value: formatDuration(metrics.response_min_ms), note: "Según métricas de FastAPI" }),
-    renderMetricCard({ label: "Respuesta máxima", value: formatDuration(metrics.response_max_ms), note: "Según métricas de FastAPI" }),
-    renderMetricCard({ label: "Duración promedio", value: formatDuration(metrics.duration_average_ms), note: "Incidentes con finalización disponible" }),
+    renderMetricCard({ label: "Total de emergencias", value: available ? String(metrics.total) : "—", note: "En el período seleccionado" }),
+    renderMetricCard({ label: "Completadas", value: available ? String(metrics.completed) : "—", note: "Finalizadas o recuperadas" }),
+    renderMetricCard({ label: "Pendientes / incompletas", value: available ? String(metrics.pending) : "—", note: "Estado actual no completado" }),
+    renderMetricCard({ label: "Respuesta promedio", value: formatDuration(metrics?.response_average_ms), note: available ? `${metrics.response_count} con medición` : "No disponible" }),
+    renderMetricCard({ label: "Respuesta mínima", value: formatDuration(metrics?.response_min_ms), note: "Milisegundos persistidos" }),
+    renderMetricCard({ label: "Respuesta máxima", value: formatDuration(metrics?.response_max_ms), note: "Milisegundos persistidos" }),
+    renderMetricCard({ label: "Duración promedio", value: formatDuration(metrics?.duration_average_ms), note: "Solo emergencias con dato" }),
+    renderMetricCard({ label: "Recuperación promedio", value: formatDuration(metrics?.recovery_average_ms), note: "Solo emergencias con dato" }),
   ].join("");
-  renderDailyChart(metrics.incidents_by_day);
-  renderStatusDistribution(metrics.status_counts, metrics.total);
+  renderDailyChart(metrics?.incidents_by_day || {});
+  renderStatusDistribution(metrics?.status_counts || {}, metrics?.total || 0);
+  renderResponseChart(metrics?.response_series || []);
+  $("#statistics-period-note").textContent = metrics
+    ? `Agregados completos del período · agrupación diaria en UTC · ${metrics.response_count} tiempos de respuesta disponibles`
+    : state.analyticsLoading
+      ? "Consultando estadísticas reales en FastAPI…"
+      : statisticsError
+        ? `Error al consultar estadísticas: ${state.data.resourceErrors["estadísticas"]}`
+        : "Estadísticas no disponibles; se reintentarán sin sustituirlas por datos ficticios.";
 }
 
 function renderDailyChart(byDay) {
-  const today = new Date();
-  const days = [];
-  for (let offset = 6; offset >= 0; offset -= 1) {
-    const day = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate() - offset));
-    const key = day.toISOString().slice(0, 10);
-    days.push({ key, count: byDay[key] || 0, label: dateFormat.format(day) });
+  const days = Object.entries(byDay).sort(([a], [b]) => a.localeCompare(b));
+  if (!days.length) {
+    $("#daily-chart").innerHTML = emptyStatisticsChart(
+      state.data.analytics?.total > 0
+        ? "No se recibieron datos diarios para incidentes existentes."
+        : "Sin emergencias en este período",
+    );
+    return;
   }
-  const maximum = Math.max(1, ...days.map((day) => day.count));
-  const width = 560;
-  const chartHeight = 170;
-  const bottom = 136;
-  const barWidth = 34;
-  const gap = 42;
-  const start = 25;
-  const bars = days.map((day, index) => {
-    const height = day.count ? Math.max(4, (day.count / maximum) * 102) : 0;
-    const x = start + index * (barWidth + gap);
+  const width = 760;
+  const bottom = 150;
+  const top = 14;
+  const slot = width / days.length;
+  const barWidth = Math.max(1, Math.min(20, slot * 0.62));
+  const maximum = Math.max(1, ...days.map(([, count]) => count));
+  const labelStep = Math.max(1, Math.ceil(days.length / 8));
+  const bars = days.map(([key, count], index) => {
+    const height = count ? Math.max(2, (count / maximum) * (bottom - top)) : 0;
+    const x = index * slot + (slot - barWidth) / 2;
     const y = bottom - height;
-    return `<g><title>${escapeHTML(day.label)}: ${day.count} ${day.count === 1 ? "incidente" : "incidentes"}</title><rect class="chart-bar ${day.count ? "chart-bar--active" : ""}" x="${x}" y="${y}" width="${barWidth}" height="${height}" rx="3"></rect>${day.count ? `<text class="chart-value" x="${x + barWidth / 2}" y="${y - 8}" text-anchor="middle">${day.count}</text>` : ""}<text class="chart-label" x="${x + barWidth / 2}" y="158" text-anchor="middle">${escapeHTML(day.label)}</text></g>`;
+    const label = dateFormat.format(new Date(`${key}T00:00:00Z`));
+    const showLabel = index % labelStep === 0 || index === days.length - 1;
+    return `<g><title>${escapeHTML(key)} UTC: ${count} ${count === 1 ? "emergencia" : "emergencias"}</title><rect class="chart-bar ${count ? "chart-bar--active" : ""}" x="${x}" y="${y}" width="${barWidth}" height="${height}" rx="2"></rect>${showLabel ? `<text class="chart-label" x="${x + barWidth / 2}" y="174" text-anchor="middle">${escapeHTML(label)}</text>` : ""}</g>`;
   }).join("");
-  $("#daily-chart").innerHTML = `<svg viewBox="0 0 ${width} ${chartHeight}" role="img" aria-label="Incidentes por día durante los últimos siete días">
-    <line class="chart-axis" x1="14" y1="${bottom}" x2="${width - 10}" y2="${bottom}"></line>${bars}
+  $("#daily-chart").innerHTML = `<svg viewBox="0 0 ${width} 184" role="img" aria-label="Emergencias por día, fechas agrupadas en UTC">
+    <line class="chart-axis" x1="0" y1="${bottom}" x2="${width}" y2="${bottom}"></line>${bars}
   </svg>`;
 }
 
 function renderStatusDistribution(counts, total) {
-  const statuses = ["RECUPERADA", "FINALIZADA", "PRIORIDAD_ACTIVADA", "DETECTADA", "INCOMPLETO"];
-  const rows = statuses.filter((status) => counts[status]).map((status) => {
-    const count = counts[status];
+  const rows = Object.entries(counts).filter(([, count]) => count > 0).map(([status, count]) => {
     const percentage = total ? Math.round((count / total) * 100) : 0;
     return `<div class="distribution-row">
       <div class="distribution-label"><span><span class="status-dot status-dot--${statusTone(status)}" aria-hidden="true"></span>${escapeHTML(statusLabel(status))}</span><strong>${count}<small>${percentage}%</small></strong></div>
       <div class="distribution-track"><span class="distribution-fill distribution-fill--${statusTone(status)}" style="width:${percentage}%"></span></div>
     </div>`;
   }).join("");
-  $("#status-chart").innerHTML = rows || `<div class="empty-state empty-state--compact"><strong>${state.data.apiAvailable ? "Sin incidentes registrados" : "Métricas no disponibles"}</strong><span>${state.data.apiAvailable ? "La distribución aparecerá con los primeros incidentes." : "Se mostrarán al restablecer la conexión con FastAPI."}</span></div>`;
+  $("#status-chart").innerHTML = rows || emptyStatisticsChart(
+    total > 0 ? "No se recibió una distribución de estados válida." : "Sin incidentes registrados",
+  );
+}
+
+function renderResponseChart(series) {
+  const measurements = series.filter((item) => Number.isFinite(item.response_ms));
+  if (!measurements.length) {
+    const responseCount = state.data.analytics?.response_count || 0;
+    $("#response-chart").innerHTML = emptyStatisticsChart(
+      responseCount > 0
+        ? `El backend informa ${responseCount} mediciones, pero no envió puntos para el gráfico.`
+        : "Sin tiempos de respuesta disponibles; se excluyen mediciones nulas.",
+    );
+    return;
+  }
+  const width = 760;
+  const height = 190;
+  const left = 38;
+  const right = 12;
+  const top = 14;
+  const bottom = 154;
+  const values = measurements.map((item) => item.response_ms);
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const range = max - min || 1;
+  const points = measurements.map((item, index) => {
+    const x = measurements.length === 1
+      ? (left + width - right) / 2
+      : left + index * (width - left - right) / (measurements.length - 1);
+    const y = bottom - ((item.response_ms - min) / range) * (bottom - top);
+    return { x, y, item };
+  });
+  const line = points.map(({ x, y }) => `${x},${y}`).join(" ");
+  const dots = points.map(({ x, y, item }) => `<circle class="response-point" cx="${x}" cy="${y}" r="3"><title>Incidente #${escapeHTML(item.incident_id)} · ${escapeHTML(formatDate(item.first_received_at))} · ${item.response_ms} ms</title></circle>`).join("");
+  $("#response-chart").innerHTML = `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Tiempo de respuesta en milisegundos por incidente real; ${measurements.length} puntos mostrados">
+    <line class="chart-axis" x1="${left}" y1="${bottom}" x2="${width - right}" y2="${bottom}"></line>
+    <text class="chart-label" x="0" y="${top + 3}">${escapeHTML(max.toLocaleString(locale))} ms</text>
+    <text class="chart-label" x="0" y="${bottom}">${escapeHTML(min.toLocaleString(locale))} ms</text>
+    ${measurements.length > 1 ? `<polyline class="response-line" points="${line}"></polyline>` : ""}${dots}
+  </svg>`;
+}
+
+function emptyStatisticsChart(emptyMessage) {
+  const hasError = Boolean(state.data.resourceErrors["estadísticas"]);
+  const title = state.analyticsLoading
+    ? "Consultando estadísticas"
+    : hasError
+      ? "Error de consulta de estadísticas"
+      : state.data.analytics
+        ? emptyMessage
+        : "Estadísticas no disponibles";
+  const description = hasError
+    ? state.data.resourceErrors["estadísticas"]
+    : state.analyticsLoading
+      ? "Esperando la respuesta de FastAPI."
+      : "Se mostrarán datos al recibir estadísticas válidas del período.";
+  return `<div class="empty-state empty-state--compact"><strong>${escapeHTML(title)}</strong><span>${escapeHTML(description)}</span></div>`;
 }
 
 function renderAll() {
@@ -677,20 +792,77 @@ async function loadRecentEvents(incidents) {
   mergeEvents(events);
 }
 
-async function loadResource(resource, request, apply) {
+async function loadResource(resource, request, apply, isCurrent = () => true) {
   try {
     const value = await request();
+    if (!isCurrent()) return true;
     reportApiSuccess(resource);
     apply(value);
     return true;
   } catch (error) {
-    reportApiFailure(resource, error);
+    if (isCurrent()) reportApiFailure(resource, error);
     return false;
   }
 }
 
+async function loadHistoryPage({ includeRecentEvents = false } = {}) {
+  const filters = historyFilters();
+  const period = selectedPeriod();
+  if (period.error) return false;
+  const requestId = ++state.historyRequestId;
+  state.historyLoading = true;
+  renderIncidents();
+  let loaded = false;
+  try {
+    loaded = await loadResource(
+      "historial",
+      () => getIncidentsPage(state.pageSize, state.historyPage * state.pageSize, filters),
+      (result) => {
+        state.data.incidents = result.items;
+        state.data.incidentTotal = result.total;
+        state.data.incidentsLoaded = true;
+        const lastPage = Math.max(0, Math.ceil(result.total / state.pageSize) - 1);
+        if (state.historyPage > lastPage) state.historyPage = lastPage;
+      },
+      () => requestId === state.historyRequestId,
+    );
+    if (loaded && includeRecentEvents && requestId === state.historyRequestId) {
+      await loadRecentEvents(state.data.incidents);
+    }
+  } finally {
+    if (requestId === state.historyRequestId) state.historyLoading = false;
+    renderIncidents();
+  }
+  return loaded;
+}
+
+async function loadAnalytics() {
+  const filters = statisticsFilters();
+  if (!filters) return false;
+  const requestId = ++state.analyticsRequestId;
+  state.analyticsLoading = true;
+  try {
+    return await loadResource(
+      "estadísticas",
+      () => getAnalytics(filters),
+      (analytics) => { state.data.analytics = analytics; },
+      () => requestId === state.analyticsRequestId,
+    );
+  } finally {
+    if (requestId === state.analyticsRequestId) state.analyticsLoading = false;
+  }
+}
+
+async function loadLatestIncident() {
+  return loadResource("última-emergencia", () => getIncidentsPage(1, 0), (result) => {
+    state.data.latestIncident = result.items[0] || null;
+    state.data.latestIncidentLoaded = true;
+  });
+}
+
 async function refreshFromApi({ includeIncidents = false, includeRecentEvents = false } = {}) {
   if (state.refreshPromise) return state.refreshPromise;
+  renewPeriodRange();
   state.refreshPromise = (async () => {
     const healthRequest = loadResource("health", getHealth, (health) => {
       state.data.health = health;
@@ -704,16 +876,19 @@ async function refreshFromApi({ includeIncidents = false, includeRecentEvents = 
       state.data.metrics = metrics;
     });
     const incidentsRequest = includeIncidents || !state.data.incidentsLoaded
-      ? loadResource("historial", getAllIncidents, (result) => {
-        state.data.incidents = result.items;
-        state.data.incidentsLoaded = true;
-      })
+      ? loadHistoryPage({ includeRecentEvents })
       : Promise.resolve(true);
+    const analyticsRequest = loadAnalytics();
+    const latestRequest = loadLatestIncident();
 
-    await Promise.all([healthRequest, stateRequest, metricsRequest, incidentsRequest]);
-    if (includeRecentEvents && state.data.incidentsLoaded) {
-      await loadRecentEvents(state.data.incidents);
-    }
+    await Promise.all([
+      healthRequest,
+      stateRequest,
+      metricsRequest,
+      incidentsRequest,
+      analyticsRequest,
+      latestRequest,
+    ]);
     updateConnectionIndicator();
     renderAll();
   })();
@@ -740,13 +915,16 @@ async function refreshHealth() {
     });
   }
   if (state.data.resourceErrors["historial"] || !state.data.incidentsLoaded) {
-    await loadResource("historial", getAllIncidents, (result) => {
-      state.data.incidents = result.items;
-      state.data.incidentsLoaded = true;
-    });
+    await loadHistoryPage();
   }
   if (state.data.resourceErrors["detalles"] && state.data.incidentsLoaded) {
     await loadRecentEvents(state.data.incidents);
+  }
+  if (state.data.resourceErrors["estadísticas"] || !state.data.analytics) {
+    await loadAnalytics();
+  }
+  if (state.data.resourceErrors["última-emergencia"] || !state.data.latestIncidentLoaded) {
+    await loadLatestIncident();
   }
   updateConnectionIndicator();
   renderAll();
@@ -758,14 +936,14 @@ function refreshIncidentsAndMetrics() {
   }
   state.incidentRefreshTimer = window.setTimeout(async () => {
     state.incidentRefreshTimer = null;
+    renewPeriodRange();
     await Promise.all([
-      loadResource("historial", getAllIncidents, (result) => {
-        state.data.incidents = result.items;
-        state.data.incidentsLoaded = true;
-      }),
+      loadHistoryPage(),
       loadResource("métricas", getMetrics, (metrics) => {
         state.data.metrics = metrics;
       }),
+      loadAnalytics(),
+      loadLatestIncident(),
     ]);
     updateConnectionIndicator();
     renderAll();
@@ -804,6 +982,42 @@ function updateClock() {
   }).format(now);
 }
 
+function syncPeriodControls() {
+  $$("[data-period-select]").forEach((select) => { select.value = state.period.value; });
+  $("#incident-from").value = state.period.from;
+  $("#statistics-from").value = state.period.from;
+  $("#incident-to").value = state.period.to;
+  $("#statistics-to").value = state.period.to;
+  const custom = state.period.value === "custom";
+  $("#incident-date-range").hidden = !custom;
+  $("#statistics-date-range").hidden = !custom;
+  const error = selectedPeriod().error || "";
+  $("#incident-period-error").textContent = error;
+  $("#statistics-period-error").textContent = error;
+}
+
+async function refreshPeriodData() {
+  renewPeriodRange();
+  syncPeriodControls();
+  const period = selectedPeriod();
+  if (period.error) {
+    state.historyLoading = false;
+    state.analyticsLoading = false;
+    state.data.analytics = null;
+    state.data.incidents = [];
+    state.data.incidentTotal = 0;
+    renderAll();
+    return;
+  }
+  state.historyPage = 0;
+  state.data.analytics = null;
+  state.historyLoading = true;
+  state.analyticsLoading = true;
+  renderStatistics();
+  await Promise.all([loadAnalytics(), loadHistoryPage()]);
+  renderAll();
+}
+
 document.addEventListener("click", (event) => {
   const viewTarget = event.target.closest("[data-view]");
   if (viewTarget) {
@@ -816,15 +1030,54 @@ document.addEventListener("click", (event) => {
 
 $("#incident-search").addEventListener("input", (event) => {
   state.search = event.target.value;
-  renderIncidents();
+  state.historyPage = 0;
+  window.clearTimeout(state.searchTimer);
+  state.searchTimer = window.setTimeout(loadHistoryPage, 250);
 });
 $("#incident-status").addEventListener("change", (event) => {
   state.statusFilter = event.target.value;
-  renderIncidents();
+  state.historyPage = 0;
+  loadHistoryPage();
 });
 $("#incident-order").addEventListener("change", (event) => {
   state.dateOrder = event.target.value;
-  renderIncidents();
+  state.historyPage = 0;
+  loadHistoryPage();
+});
+$$("[data-period-select]").forEach((select) => {
+  select.addEventListener("change", () => {
+    state.period.value = select.value;
+    void refreshPeriodData();
+  });
+});
+["incident", "statistics"].forEach((prefix) => {
+  for (const suffix of ["from", "to"]) {
+    $(`#${prefix}-${suffix}`).addEventListener("change", (event) => {
+      state.period[suffix] = event.target.value;
+      if (state.period.value === "custom") void refreshPeriodData();
+    });
+  }
+});
+$("#incident-previous").addEventListener("click", () => {
+  if (state.historyPage === 0) return;
+  state.historyPage -= 1;
+  void loadHistoryPage();
+});
+$("#incident-next").addEventListener("click", () => {
+  if ((state.historyPage + 1) * state.pageSize >= state.data.incidentTotal) return;
+  state.historyPage += 1;
+  void loadHistoryPage();
+});
+$("#incident-export").addEventListener("click", () => {
+  const period = selectedPeriod();
+  if (period.error || !state.data.apiAvailable) return;
+  const anchor = document.createElement("a");
+  anchor.href = getIncidentsCsvUrl(historyFilters());
+  anchor.download = "emergencias-siv.csv";
+  anchor.hidden = true;
+  document.body.append(anchor);
+  anchor.click();
+  anchor.remove();
 });
 $("#dialog-close").addEventListener("click", () => $("#incident-dialog").close());
 $("#incident-dialog").addEventListener("click", (event) => {
@@ -837,6 +1090,7 @@ $("#incident-alert-close").addEventListener("click", () => {
 window.addEventListener("hashchange", () => switchView(window.location.hash.slice(1) || "resumen"));
 
 updateClock();
+syncPeriodControls();
 updateConnectionIndicator();
 renderAll();
 switchView(window.location.hash.slice(1) || "resumen");
@@ -877,4 +1131,5 @@ window.addEventListener("beforeunload", () => {
   window.clearInterval(state.clockTimer);
   window.clearTimeout(state.alertTimer);
   window.clearTimeout(state.incidentRefreshTimer);
+  window.clearTimeout(state.searchTimer);
 });

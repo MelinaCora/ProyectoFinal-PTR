@@ -112,27 +112,43 @@
               <div class="table-toolbar">
                 <label class="search-field"><span class="sr-only">Buscar por ID de incidente</span><span class="search-icon" aria-hidden="true">⌕</span><input id="incident-search" type="search" placeholder="Buscar ID de incidente…" autocomplete="off"></label>
                 <div class="table-filters">
+                  <label class="select-label"><span>Período</span><select id="incident-period" data-period-select><option value="24h">Últimas 24 horas</option><option value="7d" selected>Últimos 7 días</option><option value="30d">Últimos 30 días</option><option value="all">Todo el historial</option><option value="custom">Rango personalizado</option></select></label>
                   <label class="select-label"><span>Estado</span><select id="incident-status"><option value="todos">Todos</option><option value="RECUPERADA">Recuperada</option><option value="FINALIZADA">Finalizada</option><option value="PRIORIDAD_ACTIVADA">Prioridad activa</option><option value="DETECTADA">Detectada</option><option value="INCOMPLETO">Incompleta</option></select></label>
                   <label class="select-label"><span>Fecha</span><select id="incident-order"><option value="desc">Más recientes</option><option value="asc">Más antiguas</option></select></label>
                 </div>
               </div>
+              <div class="period-range" id="incident-date-range" hidden>
+                <label class="select-label"><span>Desde (fecha local, inclusiva)</span><input id="incident-from" type="date"></label>
+                <label class="select-label"><span>Hasta (fecha local, inclusiva)</span><input id="incident-to" type="date"></label>
+                <span id="incident-period-error" class="period-error" role="status"></span>
+              </div>
               <div class="table-scroll"><table><thead><tr><th scope="col">INCIDENTE</th><th scope="col">FECHA Y HORA</th><th scope="col">ESTADO</th><th scope="col">RESPUESTA</th><th scope="col">DURACIÓN</th><th scope="col">RECUPERACIÓN</th><th scope="col"><span class="sr-only">Detalle</span></th></tr></thead><tbody id="incident-rows"></tbody></table></div>
               <div id="incident-empty" class="empty-state" hidden><span class="empty-mark" aria-hidden="true">—</span><strong>No hay incidentes para mostrar</strong><span>Ajustá la búsqueda o los filtros seleccionados.</span></div>
-              <div class="table-footer"><span id="incident-results"></span><span>Fuente: historial persistido en SQLite</span></div>
+              <div class="table-footer table-footer--history"><span id="incident-results"></span><div class="history-actions"><div class="pagination-controls"><button id="incident-previous" type="button" class="secondary-button" disabled>Anterior</button><span id="incident-page"></span><button id="incident-next" type="button" class="secondary-button" disabled>Siguiente</button></div><button id="incident-export" type="button" class="secondary-button">Exportar CSV</button></div><span>Fuente: historial persistido en SQLite</span></div>
             </section>
           </section>
 
           <section class="view-panel" id="view-estadisticas" data-panel="estadisticas" aria-labelledby="page-title-estadisticas" hidden>
             <div class="page-heading">
               <div><p class="eyebrow">ANÁLISIS OPERATIVO <span>/</span> INT-001</p><h1 id="page-title-estadisticas">Estadísticas</h1><p class="page-description">Indicadores calculados a partir de datos disponibles en FastAPI.</p></div>
-              <span class="updated-label"><span class="status-dot status-dot--amber" aria-hidden="true"></span>Datos locales</span>
+              <span class="updated-label"><span class="status-dot status-dot--amber" aria-hidden="true"></span>FastAPI + SQLite</span>
             </div>
+            <section class="panel period-toolbar" aria-label="Período de estadísticas">
+              <label class="select-label"><span>Período de análisis</span><select id="statistics-period" data-period-select><option value="24h">Últimas 24 horas</option><option value="7d" selected>Últimos 7 días</option><option value="30d">Últimos 30 días</option><option value="all">Todo el historial</option><option value="custom">Rango personalizado</option></select></label>
+              <div class="period-range" id="statistics-date-range" hidden>
+                <label class="select-label"><span>Desde (fecha local, inclusiva)</span><input id="statistics-from" type="date"></label>
+                <label class="select-label"><span>Hasta (fecha local, inclusiva)</span><input id="statistics-to" type="date"></label>
+              </div>
+              <span id="statistics-period-error" class="period-error" role="status"></span>
+              <span id="statistics-period-note" class="period-note">Período móvil; fechas almacenadas y agrupación diaria en UTC.</span>
+            </section>
             <div id="statistics-metrics" class="metric-grid metric-grid--stats"></div>
             <div class="stats-grid">
-              <section class="panel chart-panel" aria-labelledby="daily-chart-title"><div class="panel-heading"><div><p class="eyebrow">VOLUMEN DE INCIDENTES</p><h2 id="daily-chart-title">Evolución por día</h2></div><span class="chart-unit">incidentes / día</span></div><div id="daily-chart" class="chart-container"></div></section>
+              <section class="panel chart-panel" aria-labelledby="daily-chart-title"><div class="panel-heading"><div><p class="eyebrow">VOLUMEN DE INCIDENTES</p><h2 id="daily-chart-title">Emergencias por día (UTC)</h2></div><span class="chart-unit">incidentes / día</span></div><div id="daily-chart" class="chart-container"></div></section>
               <section class="panel chart-panel" aria-labelledby="status-chart-title"><div class="panel-heading"><div><p class="eyebrow">CICLO DE ATENCIÓN</p><h2 id="status-chart-title">Estado de incidentes</h2></div></div><div id="status-chart" class="status-distribution"></div></section>
+              <section class="panel chart-panel chart-panel--wide" aria-labelledby="response-chart-title"><div class="panel-heading"><div><p class="eyebrow">TIEMPO DE RESPUESTA</p><h2 id="response-chart-title">Evolución por emergencia</h2></div><span class="chart-unit">milisegundos</span></div><div id="response-chart" class="chart-container"></div></section>
             </div>
-            <p class="data-note"><span class="status-dot status-dot--amber" aria-hidden="true"></span> Las métricas se calculan solo con los registros que tienen datos válidos disponibles. No representan mediciones reales.</p>
+            <p class="data-note"><span class="status-dot status-dot--amber" aria-hidden="true"></span> Los agregados usan todos los registros del período; la línea muestra hasta 1.000 mediciones reales, muestreadas uniformemente. Las mediciones nulas se excluyen.</p>
           </section>
         </main>
         <footer class="app-footer"><span>SIV <span class="footer-divider">/</span> Supervisión de intersección</span><span>INT-001 <span class="footer-divider">·</span> API REST + WebSocket</span></footer>

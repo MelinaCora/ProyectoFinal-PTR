@@ -16,6 +16,21 @@ _STATUS_RANK = {
     "RECUPERADA": 4,
 }
 
+_INCIDENT_SELECT = """
+    SELECT i.*, s.boot_received_at, s.boot_uptime_ms, s.boot_seen,
+           (SELECT MIN(e.received_at) FROM events e
+            WHERE e.incident_row_id = i.id AND e.type = 'PRIORIDAD_ACTIVADA')
+               AS priority_received_at,
+           (SELECT MIN(e.received_at) FROM events e
+            WHERE e.incident_row_id = i.id AND e.type = 'EMERGENCIA_FINALIZADA')
+               AS finished_received_at,
+           (SELECT MIN(e.received_at) FROM events e
+            WHERE e.incident_row_id = i.id AND e.type = 'CICLO_RECUPERADO')
+               AS recovered_received_at{sort_column}
+    FROM incidents i
+    JOIN arduino_sessions s ON s.id = i.session_id
+"""
+
 
 def utc_now():
     return datetime.now(timezone.utc).isoformat(timespec="milliseconds")
@@ -305,30 +320,112 @@ class EventStore:
                 (status, uptime, data["recuperacion_ms"], row_id),
             )
 
-    def list_incidents(self, limit, offset):
+    @staticmethod
+    def _incident_filters(start_at=None, end_at=None, status=None, search=None):
+        conditions = []
+        values = []
+        if start_at is not None:
+            conditions.append("julianday(i.first_received_at) >= julianday(?)")
+            values.append(start_at)
+        if end_at is not None:
+            conditions.append("julianday(i.first_received_at) < julianday(?)")
+            values.append(end_at)
+        if status:
+            conditions.append("i.status = ?")
+            values.append(status)
+        if search:
+            value = search.strip().lstrip("#")
+            conditions.append(
+                "(instr(CAST(i.id AS TEXT), ?) > 0 "
+                "OR instr(CAST(i.incident_id AS TEXT), ?) > 0)"
+            )
+            values.extend((value, value))
+        clause = " WHERE " + " AND ".join(conditions) if conditions else ""
+        return clause, values
+
+    def list_incidents(
+        self,
+        limit,
+        offset,
+        start_at=None,
+        end_at=None,
+        status=None,
+        search=None,
+        order="desc",
+    ):
+        where, values = self._incident_filters(start_at, end_at, status, search)
+        direction = "ASC" if order == "asc" else "DESC"
         with self._lock, self._connection() as connection:
-            total = connection.execute("SELECT COUNT(*) FROM incidents").fetchone()[0]
+            total = connection.execute(
+                "SELECT COUNT(*) FROM incidents i" + where, values
+            ).fetchone()[0]
             rows = connection.execute(
-                """
-                SELECT i.*, s.boot_received_at
-                FROM incidents i
-                JOIN arduino_sessions s ON s.id = i.session_id
-                ORDER BY i.first_received_at DESC, i.id DESC
-                LIMIT ? OFFSET ?
-                """,
-                (limit, offset),
+                _INCIDENT_SELECT.format(sort_column="")
+                + where
+                + " ORDER BY COALESCE(julianday(i.first_received_at), 0) {} , i.id {} LIMIT ? OFFSET ?".format(
+                    direction, direction
+                ),
+                values + [limit, offset],
             ).fetchall()
             return {"items": [dict(row) for row in rows], "total": total}
+
+    def iter_incidents(
+        self,
+        start_at=None,
+        end_at=None,
+        status=None,
+        search=None,
+        order="desc",
+        batch_size=500,
+    ):
+        where, values = self._incident_filters(start_at, end_at, status, search)
+        direction = "ASC" if order == "asc" else "DESC"
+        comparison = ">" if order == "asc" else "<"
+        with self._lock, self._connection() as connection:
+            maximum_id = connection.execute(
+                "SELECT COALESCE(MAX(id), 0) FROM incidents"
+            ).fetchone()[0]
+        if maximum_id == 0:
+            return
+
+        base_conditions = where[7:] if where else ""
+        last_sort_time = None
+        last_id = None
+        while True:
+            conditions = [base_conditions] if base_conditions else []
+            conditions.append("i.id <= ?")
+            query_values = values + [maximum_id]
+            if last_sort_time is not None:
+                conditions.append(
+                    "(COALESCE(julianday(i.first_received_at), 0) {0} ? OR "
+                    "(COALESCE(julianday(i.first_received_at), 0) = ? AND i.id {0} ?))".format(
+                        comparison
+                    )
+                )
+                query_values.extend((last_sort_time, last_sort_time, last_id))
+            clause = " WHERE " + " AND ".join(conditions)
+            with self._lock, self._connection() as connection:
+                rows = connection.execute(
+                    _INCIDENT_SELECT.format(
+                        sort_column=", COALESCE(julianday(i.first_received_at), 0) AS _sort_time"
+                    )
+                    + clause
+                    + " ORDER BY COALESCE(julianday(i.first_received_at), 0) {} , i.id {} LIMIT ?".format(
+                        direction, direction
+                    ),
+                    query_values + [batch_size],
+                ).fetchall()
+            if not rows:
+                break
+            last_sort_time = rows[-1]["_sort_time"]
+            last_id = rows[-1]["id"]
+            for row in rows:
+                yield {key: row[key] for key in row.keys() if key != "_sort_time"}
 
     def get_incident(self, incident_row_id):
         with self._lock, self._connection() as connection:
             row = connection.execute(
-                """
-                SELECT i.*, s.boot_received_at, s.boot_uptime_ms, s.boot_seen
-                FROM incidents i
-                JOIN arduino_sessions s ON s.id = i.session_id
-                WHERE i.id = ?
-                """,
+                _INCIDENT_SELECT.format(sort_column="") + " WHERE i.id = ?",
                 (incident_row_id,),
             ).fetchone()
             if row is None:
@@ -366,3 +463,84 @@ class EventStore:
                 """
             ).fetchone()
             return dict(row)
+
+    def analytics(self, start_at=None, end_at=None):
+        where, values = self._incident_filters(start_at, end_at)
+        response_where = where + " AND" if where else " WHERE"
+        with self._lock, self._connection() as connection:
+            summary = dict(
+                connection.execute(
+                    """
+                    SELECT COUNT(*) AS total,
+                           COUNT(response_ms) AS response_count,
+                           AVG(response_ms) AS response_average_ms,
+                           MIN(response_ms) AS response_min_ms,
+                           MAX(response_ms) AS response_max_ms,
+                           AVG(duration_ms) AS duration_average_ms,
+                           AVG(recovery_ms) AS recovery_average_ms,
+                           SUM(CASE WHEN status IN ('FINALIZADA', 'RECUPERADA')
+                                    THEN 1 ELSE 0 END) AS completed,
+                           SUM(CASE WHEN status IN (
+                               'INCOMPLETO', 'DETECTADA', 'PRIORIDAD_ACTIVADA'
+                           ) THEN 1 ELSE 0 END) AS pending
+                    FROM incidents i
+                    """
+                    + where,
+                    values,
+                ).fetchone()
+            )
+            summary["completed"] = summary["completed"] or 0
+            summary["pending"] = summary["pending"] or 0
+            summary["status_counts"] = {
+                row["status"]: row["count"]
+                for row in connection.execute(
+                    "SELECT i.status, COUNT(*) AS count FROM incidents i"
+                    + where
+                    + " GROUP BY i.status ORDER BY i.status",
+                    values,
+                ).fetchall()
+            }
+            summary["incidents_by_day"] = {
+                row["day"]: row["count"]
+                for row in connection.execute(
+                    "SELECT date(i.first_received_at) AS day, COUNT(*) AS count "
+                    "FROM incidents i"
+                    + where
+                    + " GROUP BY date(i.first_received_at) ORDER BY day",
+                    values,
+                ).fetchall()
+                if row["day"] is not None
+            }
+            summary["response_series"] = [
+                dict(row)
+                for row in connection.execute(
+                    """
+                    WITH measurements AS (
+                        SELECT i.id, i.incident_id, i.first_received_at,
+                               i.response_ms,
+                               ROW_NUMBER() OVER (ORDER BY COALESCE(
+                                   julianday(i.first_received_at), 0
+                               ), i.id) AS row_number,
+                               COUNT(*) OVER () AS measurement_count
+                        FROM incidents i
+                        """
+                    + response_where
+                    + """
+                          i.response_ms IS NOT NULL
+                    ), buckets AS (
+                        SELECT *, (row_number - 1) * 1000 / measurement_count AS bucket
+                        FROM measurements
+                    ), sampled AS (
+                        SELECT *, LAG(bucket) OVER (ORDER BY row_number) AS previous_bucket
+                        FROM buckets
+                    )
+                    SELECT id, incident_id, first_received_at, response_ms,
+                           measurement_count
+                    FROM sampled
+                    WHERE previous_bucket IS NULL OR bucket != previous_bucket
+                    ORDER BY COALESCE(julianday(first_received_at), 0), id
+                    """,
+                    values,
+                ).fetchall()
+            ]
+            return summary

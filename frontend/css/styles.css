@@ -316,6 +316,13 @@ h1 { margin-bottom: 4px; font-size: 22px; font-weight: 600; letter-spacing: -.03
 .select-label { display: grid; gap: 2px; color: var(--muted); font-size: 8px; }
 .select-label select { min-width: 120px; border: 0; background: transparent; color: #d0d8de; font-size: 10px; cursor: pointer; }
 .select-label select option { background: var(--surface); }
+.period-range { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; padding: 10px 15px; border-bottom: 1px solid var(--border); }
+.period-range[hidden] { display: none; }
+.period-range input { min-height: 28px; padding: 3px 6px; border: 1px solid var(--border-strong); border-radius: 3px; background: #121920; color: var(--text); font: 10px var(--mono); color-scheme: dark; }
+.period-error { color: #d58a8b; font-size: 9px; }
+.period-toolbar { display: flex; flex-wrap: wrap; align-items: end; gap: 14px; margin-bottom: 12px; padding: 11px 14px; }
+.period-toolbar > .period-range { padding: 0; border: 0; }
+.period-note { margin-left: auto; color: var(--muted); font-size: 9px; }
 .table-scroll { overflow-x: auto; }
 table { width: 100%; border-collapse: collapse; text-align: left; }
 thead { background: #151d25; }
@@ -330,16 +337,23 @@ tbody tr:hover { background: #1b2530; }
 .row-action:hover { color: #c2ddec; }
 .row-action span { padding-left: 3px; font-size: 12px; }
 .table-footer { display: flex; justify-content: space-between; gap: 12px; padding: 11px 14px; border-top: 1px solid var(--border); color: var(--muted); font-size: 9px; }
+.table-footer--history { align-items: center; flex-wrap: wrap; }
+.history-actions, .pagination-controls { display: inline-flex; align-items: center; gap: 7px; }
+.pagination-controls { color: var(--text-soft); font: 9px var(--mono); }
+.secondary-button { min-height: 29px; padding: 5px 9px; border: 1px solid var(--border-strong); border-radius: 3px; background: #18212a; color: #c4cfd6; font-size: 9px; cursor: pointer; }
+.secondary-button:hover:not(:disabled) { border-color: #66869a; color: #e0e9ee; }
+.secondary-button:disabled { opacity: .45; cursor: not-allowed; }
 .empty-state { display: grid; min-height: 210px; align-content: center; justify-items: center; gap: 6px; color: var(--muted); text-align: center; }
 .empty-state strong { color: #c8d1d8; font-size: 12px; font-weight: 500; }
 .empty-state > span { font-size: 10px; }
 .empty-mark { color: #84919b; font: 22px var(--mono); }
 .empty-state--compact { min-height: 100px; }
 
-.metric-grid--stats { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+.metric-grid--stats { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 .metric-grid--stats .metric-card { min-height: 96px; }
 .metric-grid--stats .metric-value { font-size: clamp(16px, 1.7vw, 22px); }
 .stats-grid { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(250px, 1fr); gap: 10px; }
+.chart-panel--wide { grid-column: 1 / -1; }
 .chart-panel { min-height: 275px; }
 .chart-unit { color: var(--muted); font: 9px var(--mono); }
 .chart-container { margin-top: 12px; }
@@ -349,6 +363,8 @@ tbody tr:hover { background: #1b2530; }
 .chart-bar--active { fill: #6f9c84; }
 .chart-label { fill: #86949f; font: 9px "DM Mono", monospace; }
 .chart-value { fill: #c8d8cf; font: 10px "DM Mono", monospace; }
+.response-line { fill: none; stroke: #78a7bd; stroke-width: 2; vector-effect: non-scaling-stroke; }
+.response-point { fill: #9cc4d5; stroke: #17212a; stroke-width: 1; vector-effect: non-scaling-stroke; }
 .status-distribution { display: grid; gap: 16px; padding-top: 9px; }
 .distribution-label { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; color: #c7d0d7; font-size: 10px; }
 .distribution-label > span { display: inline-flex; align-items: center; gap: 8px; }
@@ -475,6 +491,12 @@ tbody tr:hover { background: #1b2530; }
   .table-toolbar { align-items: stretch; flex-direction: column; gap: 10px; padding: 11px; }
   .search-field { width: 100%; }
   .table-filters { justify-content: space-between; }
+  .period-range { align-items: start; padding: 10px 11px; }
+  .period-range .select-label { min-width: 130px; }
+  .period-toolbar { align-items: stretch; flex-direction: column; gap: 10px; padding: 11px; }
+  .period-toolbar > .period-range { padding: 0; }
+  .period-note { margin-left: 0; line-height: 1.5; }
+  .history-actions { flex-wrap: wrap; }
   .select-label { flex: 1; }
   .select-label select { min-width: 0; }
   .table-scroll { margin: 0; }

@@ -1,4 +1,4 @@
-# Dashboard web SIV — Fase 5B
+# Dashboard web SIV — Fase 5C
 
 Dashboard local de supervisión para FastAPI. No controla Arduino. Los datos se
 obtienen de la API REST y del WebSocket; no se usan fixtures de demostración.
@@ -49,6 +49,25 @@ curl.exe -i -H "Origin: http://localhost:8080" "http://localhost:8000/api/emerge
 La respuesta debe incluir `Access-Control-Allow-Origin: http://localhost:8080`.
 En caso de fallo interno, los tests comprueban que la respuesta 500 también
 conserve esa cabecera.
+
+## Estadísticas e historial
+
+Estadísticas usa agregados calculados por SQLite para el período elegido:
+totales, estados, promedios/min/max en milisegundos, emergencias por día y
+tiempos de respuesta por incidente. Los valores nulos se excluyen de sus
+promedios. El filtro personalizado interpreta las fechas como días calendario
+locales inclusivos; las convierte a instantes UTC y el backend aplica el final
+como límite exclusivo. La agrupación de días del gráfico usa UTC.
+
+El historial pagina los resultados y comparte el filtro de período; búsqueda,
+estado y orden también se aplican al CSV. **Exportar CSV** genera el archivo
+completo filtrado desde SQLite, en UTF-8 con BOM y separador `;` para Excel.
+La línea de tiempos de respuesta muestra hasta 1.000 incidentes reales
+uniformemente muestreados; los agregados abarcan todo el período seleccionado.
+El modelo no registra carril en todos los incidentes y no se atribuye uno.
+La vista requiere la respuesta extendida de `/api/metricas?detalle=true`;
+reiniciá FastAPI al actualizar el backend. Una instancia anterior que ignore
+ese parámetro se identifica como contrato incompleto, no como período vacío.
 
 ## Pruebas
 

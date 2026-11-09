@@ -33,3 +33,28 @@ export function calculateMetrics(records, serverMetrics = {}) {
     incidents_by_day: byDay,
   };
 }
+
+function localDateStart(value) {
+  const [year, month, day] = value.split("-").map(Number);
+  return new Date(year, month - 1, day);
+}
+
+export function getPeriodRange(period, from = "", to = "", now = new Date()) {
+  if (period === "all") return { start: null, end: null };
+  if (period === "custom") {
+    if (!from || !to) return { error: "Seleccioná las dos fechas del período." };
+    const start = localDateStart(from);
+    const end = localDateStart(to);
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || start > end) {
+      return { error: "La fecha inicial debe ser anterior o igual a la fecha final." };
+    }
+    end.setDate(end.getDate() + 1);
+    return { start: start.toISOString(), end: end.toISOString() };
+  }
+  const duration = ({ "24h": 24, "7d": 7 * 24, "30d": 30 * 24 })[period];
+  if (!duration) return { error: "Período no válido." };
+  return {
+    start: new Date(now.getTime() - duration * 60 * 60 * 1000).toISOString(),
+    end: now.toISOString(),
+  };
+}
